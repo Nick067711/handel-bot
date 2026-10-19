@@ -147,7 +147,7 @@ async def generate_ai_analysis(tech_summary):
     """
     
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=prompt
     )
     
@@ -219,7 +219,6 @@ async def main():
         await asyncio.sleep(1)
         await send_telegram(part2)
         
-        # Generowanie HTML - przygotowanie wierszy w osobnych zmiennych dla bezpieczeństwa składni
         btc_rows = ""
         for bar in intervals:
             d = btc_data[bar]
