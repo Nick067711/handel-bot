@@ -1,16 +1,11 @@
 import os
-import smtplib
-import ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import requests
 from google import genai
 
 # 1. Pobieranie kluczy ze zmiennych środowiskowych (GitHub Secrets)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-SMTP_USER = os.environ.get("SMTP_USER")
-SMTP_PASS = os.environ.get("SMTP_PASS")
-RECIPIENT_EMAIL = "nick06711@gmail.com"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 # 2. Inicjalizacja klienta Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -27,26 +22,22 @@ def fetch_okx_data():
         print(f"Błąd pobierania danych OKX: {e}")
     return []
 
-def send_email(subject, body):
-    """Wysyła wiadomość e-mail przez Gmail SMTP z jawnym kontekstem SSL."""
+def send_telegram_message(message):
+    """Wysyła wiadomość bezpośrednio na Twój czat Telegram."""
     try:
-        msg = MIMEMultipart()
-        msg['From'] = SMTP_USER
-        msg['To'] = RECIPIENT_EMAIL
-        msg['Subject'] = subject
-
-        msg.attach(MIMEText(body, 'plain', 'utf-8'))
-
-        # Tworzenie bezpiecznego kontekstu SSL dla środowiska chmurowego
-        context = ssl.create_default_context()
-        
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context) as server:
-            server.login(SMTP_USER, SMTP_PASS)
-            server.send_message(msg)
-            
-        print("E-mail został pomyślnie wysłany!")
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            "chat_id": TELEGRAM_CHAT_ID,
+            "text": message,
+            "parse_mode": "Markdown"
+        }
+        res = requests.post(url, json=payload, timeout=10)
+        if res.status_code == 200:
+            print("Wiadomość na Telegram została pomyślnie wysłana!")
+        else:
+            print(f"Błąd wysyłki na Telegram: {res.text}")
     except Exception as e:
-        print(f"Błąd wysyłki e-mail: {e}")
+        print(f"Błąd wysyłki na Telegram: {e}")
 
 def run_analysis():
     # Pobranie surowych danych rynkowych
@@ -75,12 +66,11 @@ Zasady analizy jakościowej:
 Dane rynkowe:
 {tickers_summary}
 
-Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami dla sesji.
+Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami dla sesji, sformatowany estetycznie pod czytanie na telefonie.
 """
 
     print("Przesyłanie danych do analizy AI...")
     
-    # Wywołanie modelu gemini-3.8-flash
     response = client.models.generate_content(
         model='gemini-3.8-flash',
         contents=prompt,
@@ -89,9 +79,15 @@ Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami 
     report_text = response.text
     print("Analiza ukończona.")
 
-    # Wysyłka e-maila
-    subject = "Raport Rynkowy AI — Monitoring OKX & STRK"
-    send_email(subject, report_text)
+    # Formatowanie wiadomości pod Telegram
+    header = "🚨 *Raport Rynkowy AI — Monitoring OKX & STRK*\n\n"
+    full_message = header + report_text
+    
+    # Zabezpieczenie przed limitem długości wiadomości Telegrama (4000 znaków)
+    if len(full_message) > 4000:
+        full_message = full_message[:3900] + "\n\n*(Wiadomość przycięta ze względu na limit długości)*"
+
+    send_telegram_message(full_message)
 
 if __name__ == "__main__":
     run_analysis()
