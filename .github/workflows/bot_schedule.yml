@@ -1,0 +1,28 @@
+name: Crypto Market AI Bot
+
+on:
+  schedule:
+    - cron: '0 7,15 * * *' # Uruchomienie o 7:00 UTC (8:00 PL) oraz 15:00 UTC (16:00 PL)
+  workflow_dispatch:    # Przycisk do ręcznego odpalenia w każdej chwili
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz kod z repozytorium
+        uses: actions/checkout@v4
+
+      - name: Konfiguracja Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalacja bibliotek
+        run: pip install -r requirements.txt
+
+      - name: Uruchomienie bota i analiza AI
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+        run: python bot.py
