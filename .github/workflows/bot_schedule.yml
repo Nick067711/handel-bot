@@ -35,14 +35,3 @@ jobs:
           LANG: "C.UTF-8"
           LC_ALL: "C.UTF-8"
         run: python bot.py
-
-      - name: Commit and push index.html if changed
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add index.html || true
-          git diff --quiet && git diff --staged --quiet || (
-            git pull --rebase origin main && \
-            git commit -m "Automatyczna aktualizacja index.html [skip ci]" && \
-            git push origin main
-          )
