@@ -6,13 +6,13 @@ import numpy as np
 from google import genai
 
 # --- KONFIGURACJA ŚRODOWISKOWA / API ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "TUTAJ_TOKEN_TELEGRAM")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "TUTAJ_CHAT_ID")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "TUTAJ_GEMINI_KEY")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
-FTP_USER = os.getenv("FTP_USER", "TWOJ_FTP_USER")
-FTP_PASS = os.getenv("FTP_PASS", "TWOJ_FTP_PASS")
+FTP_USER = os.getenv("FTP_USER", "")
+FTP_PASS = os.getenv("FTP_PASS", "")
 
 
 # --- KALKULATOR WSKAŹNIKÓW TECHNICZNYCH ---
@@ -98,33 +98,38 @@ class TechnicalIndicators:
 
 async def fetch_market_data(session, inst_id, bar):
     url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit=100"
-    try:
-        async with session.get(url, timeout=10) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if data.get("data"):
-                    candles = data["data"][::-1] # Od najstarszej do najnowszej
-                    closes = [float(c[4]) for c in candles]
-                    
-                    rsi = TechnicalIndicators.calculate_rsi(closes)
-                    ema20 = TechnicalIndicators.calculate_ema(closes, 20)
-                    ema50 = TechnicalIndicators.calculate_ema(closes, 50)
-                    ema200 = TechnicalIndicators.calculate_ema(closes, 200) if len(closes) >= 200 else ema50
-                    macd = TechnicalIndicators.calculate_macd(closes)
-                    stoch = TechnicalIndicators.calculate_stoch_rsi(closes)
-                    
-                    return {
-                        "close": closes[-1],
-                        "rsi": rsi,
-                        "stoch_k": stoch["k"],
-                        "macd_hist": macd["hist"],
-                        "ema20": ema20,
-                        "ema50": ema50,
-                        "ema200": ema200
-                    }
-    except Exception as e:
-        print(f"Błąd pobierania {inst_id} ({bar}): {e}")
-    return None
+    for attempt in range(3):
+        try:
+            async with session.get(url, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("data") and len(data["data"]) > 0:
+                        candles = data["data"][::-1]
+                        closes = [float(c[4]) for c in candles]
+                        
+                        rsi = TechnicalIndicators.calculate_rsi(closes)
+                        ema20 = TechnicalIndicators.calculate_ema(closes, 20)
+                        ema50 = TechnicalIndicators.calculate_ema(closes, 50)
+                        ema200 = TechnicalIndicators.calculate_ema(closes, 200) if len(closes) >= 200 else ema50
+                        macd = TechnicalIndicators.calculate_macd(closes)
+                        stoch = TechnicalIndicators.calculate_stoch_rsi(closes)
+                        
+                        return {
+                            "close": closes[-1],
+                            "rsi": rsi,
+                            "stoch_k": stoch["k"],
+                            "macd_hist": macd["hist"],
+                            "ema20": ema20,
+                            "ema50": ema50,
+                            "ema200": ema200
+                        }
+        except Exception as e:
+            print(f"Próba {attempt+1} - Błąd pobierania {inst_id} ({bar}): {e}")
+        await asyncio.sleep(2)
+        
+    return {
+        "close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0, "ema200": 0.0
+    }
 
 
 # --- GENEROWANIE RAPORTU PRZEZ GEMINI ---
@@ -133,7 +138,7 @@ async def generate_ai_analysis(tech_summary):
     
     prompt = f"""
     Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor. 
-    Przygotuj profesjonalny raport handlowy na podstawie bieżących wskaźników i sytuacji rynkowej:
+    Przygotuj profesjonalny raport handlowy na podstawie bieżących wskaźników i sytuacji rynkowej (interwały wyższe: 1h, 4h, 1D, 1W):
     {tech_summary}
     
     Podziel raport na dwie niezależne części:
@@ -142,12 +147,11 @@ async def generate_ai_analysis(tech_summary):
     """
     
     response = client.models.generate_content(
-        model="gemini-2.5-flash",  # Zgodnie z wytycznymi stabilny model
+        model="gemini-2.5-flash",
         contents=prompt
     )
     
     text = response.text
-    # Dzielimy na dwie części (np. po wystąpieniu nagłówka lub w połowie)
     parts = text.split("Top Selekcja")
     part1 = parts[0].strip()
     part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Brak danych sekcji 2."
@@ -156,9 +160,10 @@ async def generate_ai_analysis(tech_summary):
 
 # --- WYSYŁKA NA TELEGRAM ---
 async def send_telegram(text):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     async with aiohttp.ClientSession() as session:
-        # Bez parse_mode, czysty tekst zgodnie z wytycznymi
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
         async with session.post(url, json=payload) as resp:
             return await resp.text()
@@ -166,6 +171,8 @@ async def send_telegram(text):
 
 # --- WYSYŁKA HTML NA FTP ---
 def upload_html_to_ftp(html_content):
+    if not FTP_USER or not FTP_PASS:
+        return
     with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
         try:
             ftp.cwd("domains/piwecki.pl/public_html/analiza")
@@ -187,26 +194,33 @@ def upload_html_to_ftp(html_content):
 # --- GŁÓWNA PĘTLA PROGRAMU ---
 async def main():
     async with aiohttp.ClientSession() as session:
-        btc_5m = await fetch_market_data(session, "BTC-USDT-SWAP", "5m")
-        btc_1h = await fetch_market_data(session, "BTC-USDT-SWAP", "1h")
-        strk_5m = await fetch_market_data(session, "STRK-USDT-SWAP", "5m")
-        strk_1h = await fetch_market_data(session, "STRK-USDT-SWAP", "1h")
+        # Pobieramy interwały: 1h, 4h, 1d, 1w
+        intervals = ["1h", "4h", "1d", "1w"]
         
-        tech_summary = f"""
-        BTC 5m: Cena: {btc_5m['close']}, RSI: {btc_5m['rsi']}, StochRSI_K: {btc_5m['stoch_k']}, MACD Hist: {btc_5m['macd_hist']}, EMA20: {btc_5m['ema20']}, EMA50: {btc_5m['ema50']}
-        BTC 1h: Cena: {btc_1h['close']}, RSI: {btc_1h['rsi']}, StochRSI_K: {btc_1h['stoch_k']}, MACD Hist: {btc_1h['macd_hist']}, EMA20: {btc_1h['ema20']}, EMA50: {btc_1h['ema50']}
-        STRK 5m: Cena: {strk_5m['close']}, RSI: {strk_5m['rsi']}, StochRSI_K: {strk_5m['stoch_k']}, MACD Hist: {strk_5m['macd_hist']}, EMA20: {strk_5m['ema20']}, EMA50: {strk_5m['ema50']}
-        STRK 1h: Cena: {strk_1h['close']}, RSI: {strk_1h['rsi']}, StochRSI_K: {strk_1h['stoch_k']}, MACD Hist: {strk_1h['macd_hist']}, EMA20: {strk_1h['ema20']}, EMA50: {strk_1h['ema50']}
-        """
+        btc_data = {}
+        strk_data = {}
         
-        part1, part2 = await asyncio.to_thread(asyncio.run, generate_ai_analysis(tech_summary)) if False else await generate_ai_analysis(tech_summary)
+        for bar in intervals:
+            btc_data[bar] = await fetch_market_data(session, "BTC-USDT-SWAP", bar)
+            strk_data[bar] = await fetch_market_data(session, "STRK-USDT-SWAP", bar)
         
-        # Wysyłka na Telegram (2 wiadomości)
+        tech_summary = "BTC Wyższe Interwały:\n"
+        for bar in intervals:
+            d = btc_data[bar]
+            tech_summary += f"- {bar}: Cena: {d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: {d['ema20']}, EMA50: {d['ema50']}\n"
+            
+        tech_summary += "\nSTRK Wyższe Interwały:\n"
+        for bar in intervals:
+            d = strk_data[bar]
+            tech_summary += f"- {bar}: Cena: {d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: {d['ema20']}, EMA50: {d['ema50']}\n"
+        
+        part1, part2 = await generate_ai_analysis(tech_summary)
+        
         await send_telegram(part1)
         await asyncio.sleep(1)
         await send_telegram(part2)
         
-        # Budowanie strony HTML z oddzielonymi sekcjami technicznych wskaźników
+        # Generowanie HTML
         html_content = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -234,24 +248,21 @@ async def main():
         <h2>Top Selekcja Altcoinowa</h2>
         <pre>{part2}</pre>
 
-        <h2>Dane Techniczne i Wskaźniki</h2>
+        <h2>Dane Techniczne i Wskaźniki (1h, 4h, 1D, 1W)</h2>
         
         <div class="tech-box">
             <h3>BTC (Bitcoin)</h3>
-            <div class="data-row"><b>5m:</b> Zamknięcie: ${btc_5m['close']} | RSI: {btc_5m['rsi']} | StochRSI K: {btc_5m['stoch_k']} | MACD Hist: {btc_5m['macd_hist']} | EMA20: {btc_5m['ema20']} | EMA50: {btc_5m['ema50']}</div>
-            <div class="data-row"><b>1h:</b> Zamknięcie: ${btc_1h['close']} | RSI: {btc_1h['rsi']} | StochRSI K: {btc_1h['stoch_k']} | MACD Hist: {btc_1h['macd_hist']} | EMA20: {btc_1h['ema20']} | EMA50: {btc_1h['ema50']}</div>
+            {''.join([f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${btc_data[bar]["close"]} | RSI: {btc_data[bar]["rsi"]} | StochRSI K: {btc_data[bar]["stoch_k"]} | MACD Hist: {btc_data[bar]["macd_hist"]} | EMA20: {btc_data[bar]["ema20"]} | EMA50: {btc_data[bar]["ema50"]}</div>' for bar in intervals])}
         </div>
 
         <div class="tech-box">
             <h3>STRK (Starknet)</h3>
-            <div class="data-row"><b>5m:</b> Zamknięcie: ${strk_5m['close']} | RSI: {strk_5m['rsi']} | StochRSI K: {strk_5m['stoch_k']} | MACD Hist: {strk_5m['macd_hist']} | EMA20: {strk_5m['ema20']} | EMA50: {strk_5m['ema50']}</div>
-            <div class="data-row"><b>1h:</b> Zamknięcie: ${strk_1h['close']} | RSI: {strk_1h['rsi']} | StochRSI K: {strk_1h['stoch_k']} | MACD Hist: {strk_1h['macd_hist']} | EMA20: {strk_1h['ema20']} | EMA50: {strk_1h['ema50']}</div>
+            {''.join([f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${strk_data[bar]["close"]} | RSI: {strk_data[bar]["rsi"]} | StochRSI K: {strk_data[bar]["stoch_k"]} | MACD Hist: {strk_data[bar]["macd_hist"]} | EMA20: {strk_data[bar]["ema20"]} | EMA50: {strk_data[bar]["ema50']}</div>' for bar in intervals])}
         </div>
     </div>
 </body>
 </html>
 """
-        # Upload pliku index.html do /analiza/ na FTP
         upload_html_to_ftp(html_content)
         print("Raport HTML pomyślnie wygenerowany i przesłany na serwer pod https://piwecki.pl/analiza/")
 
