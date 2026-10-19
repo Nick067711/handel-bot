@@ -2,7 +2,7 @@ name: Market Maker Monitor Schedule
 
 on:
   schedule:
-    # Uruchamianie wg potrzeb (np. co 6 godzin)
+    # Uruchamianie co 6 godzin
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
@@ -36,13 +36,13 @@ jobs:
           LC_ALL: "C.UTF-8"
         run: python bot.py
 
-      - name: Commit and push latest report if changed
+      - name: Commit and push index.html if changed
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add latest_report.md
+          git add index.html || true
           git diff --quiet && git diff --staged --quiet || (
             git pull --rebase origin main && \
-            git commit -m "Automatyczna aktualizacja latest_report.md [skip ci]" && \
+            git commit -m "Automatyczna aktualizacja index.html [skip ci]" && \
             git push origin main
           )
