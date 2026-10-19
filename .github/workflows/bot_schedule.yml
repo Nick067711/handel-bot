@@ -41,4 +41,8 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add latest_report.md
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Automatyczna aktualizacja latest_report.md [skip ci]" && git push)
+          git diff --quiet && git diff --staged --quiet || (
+            git pull --rebase origin main && \
+            git commit -m "Automatyczna aktualizacja latest_report.md [skip ci]" && \
+            git push origin main
+          )
