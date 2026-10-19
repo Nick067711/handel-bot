@@ -127,8 +127,8 @@ Zasady i Guardraile:
 Sformatuj odpowiedź wyraźnie rozdzielając CZĘŚĆ 1 i CZĘŚĆ 2 za pomocą separatora ===SEPARATOR===.
 """
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
+response = client.models.generate_content(
+        model="gemini-3.8-flash",
         contents=prompt
     )
     
