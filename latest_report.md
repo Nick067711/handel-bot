@@ -1,61 +1,109 @@
-# Raport Rynkowy - 39232283367
-
-📊 CZĘŚĆ 1: KONDYCJA RYNKU, BTC, STRK & SONIC
-
-### 1. BITCOIN & SMART MONEY
-
-* **Kondycja makro i sentyment:**  
-  Sieć Bitcoin wykazuje potężną siłę fundamentalną – hash rate utrzymuje się na rekordowo wysokim poziomie ok. 1.11 EH/s, a dzienna liczba transakcji on-chain sięga blisko 590,000, co świadczy o nieustannej absorpcji podaży przez uczestników rynku. Cena rynkowa oscyluje wokół $82,993, konsolidując się bezpośrednio pod lokalnym oporem $83,168 po obronie dołka na poziomie $80,680. Znakomity 24-godzinny wolumen na parach spot i instrumentach pochodnych OKX (przekraczający $417M łącznie na parach USDT i USDC) potwierdza dominację strony popytowej i akumulację typu *Smart Money*. Struktura rynkowa pozostaje prowzrostowa z perspektywą ataku na nowe maksima.
-
-* **Safe Position Size:**  
-  **Bardzo wysoki (Top Tier)** – BTC charakteryzuje się najwyższą dostępną głębokością księgi zleceń i płynnością. Dopuszczalna ekspozycja bazowa bez ryzyka zauważalnego poślizgu cenowego (slippage) wynosi do **20–35% łącznego portfela krypto**, stanowiąc trzon alokacji kapitału.
+# RAPORT RYNKOWY: MARKET MAKER MONITOR
+**Data i Czas Analizy:** Bieżące ujęcie sesyjne  
+**Główny Wolumen Referencyjny:** OKX Spot / Derivatives Data Feed  
 
 ---
 
-### 2. STARKNET (STRK)
+## CZĘŚĆ 1: KONDYCJA RYNKU, BTC & SMART MONEY, STRK ORAZ SONIC (S)
 
-* **Ocena strukturalna i decyzja:**  
-  STRK notowany jest na poziomie $0.05954, poruszając się w dolnym zakresie 24-godzinnego pasma ($0.05833 – $0.06348). Płynność instrumentów pochodnych jest znacząca (obrót rzędu 1.68 mld jednostek na SWAP oraz ponad $10.3M wolumenu na rynku spot USDT), co zapewnia stabilne środowisko egzekucji. Niemniej jednak struktura cenowa wykazuje wyraźną presję podażową po nieudanym teście poziomu $0.0635.  
-  * **Decyzja:** **NEUTRALNA / OBSERWACJA (Wait-and-See)**. Wstrzymanie się z agresywnymi pozycjami typu Long do momentu trwałego odzyskania poziomu $0.0610 lub akumulacja wyłącznie w formie siatki zleceń typu limit w rejonie wsparcia $0.0580–$0.0585 ze ścisłym zleceniem stop-loss.
+### 1. Kondycja Rynku i Globalna Płynność
+Struktura obrotu na giełdzie OKX wykazuje wyraźną dominację transferu kapitału przez bramki fiat i stablecoiny. Para BTC-USDT generuje ponad $431.5M obrotu w 24h, a tuż za nią plasują się korytarze USDT-TRY ($331.1M) oraz USDC-USDT ($297.3M). Tak wysoka aktywność na parach konwersyjnych i fiatowych (TRY, BRL) wskazuje na silną arbitrażową działalność animatorów rynku oraz ucieczkę kapitału regionalnego w kierunku dolara syntetycznego.
 
-* **Safe Position Size:**  
-  **Średni** – solidny wolumen instrumentu pochodnego i rynku spot pozwala na bezpieczne zaangażowanie na poziomie **2–4% portfela**, przy czym pojedyncze zlecenia egzekwowane rynkowo (market order) nie powinny przekraczać ułamka procenta dziennego wolumenu spot, by uniknąć mikro-poślizgów.
+Rynek altcoinów o wysokiej kapitalizacji znajduje się w fazie selektywnej konsolidacji. ETH utrzymuje wycenę na poziomie $2,415.36 z wolumenem $203.0M, wykazując relatywną słabość w stosunku do Bitcoina, podczas gdy Solana ($104.49, $63.2M wolumenu) testuje kluczowe obszary absorpcji podaży. Całkowity sentyment charakteryzuje się ostrożnością – brak agresywnego lewarowania detalicznego pozwala Market Makerom na precyzyjną akumulację w strefach dyskontowych.
 
 ---
 
-### 3. SONIC (S / S-USDC)
+### 2. Bitcoin (BTC) & Analiza Przepływów Smart Money
+* **Aktualny kurs:** $82,180.70 (BTC-USDT) / $82,101.20 (BTC-USDC)
+* **Wolumen 24h (łączny Spot BTC):** Ponad $488M (USDT, USDC, TRY)
 
-* **Analiza właściwej pary S:**  
-  Natywny token Sonic (ticker: **S**, notowany na OKX w parach S-USDT, S-USDT-SWAP oraz S-USDC) notuje relatywnie dynamiczny ruch, osiągając cenę $0.05411 po odbiciu od dołka $0.04919 (szczyt 24h na poziomie $0.05669). Kluczowa płynność skupiona jest na kontrakcie wieczystym SWAP (obrót rzędu 179.8M jednostek), podczas gdy rynek spot generuje umiarkowany obrót (ponad $616,000 na S-USDT oraz ok. $39,000 na S-USDC). Struktura wykazuje formację lokalnego ożywienia popytowego, lecz z uwagi na rozproszenie płynności rynek spot wykazuje podatność na wahania.
-
-* **Safe Position Size:**  
-  **Niski do umiarkowanego** – z uwagi na płytki arkusz na parach bazowych spot (w szczególności S-USDC), zalecana maksymalna wielkość pozycji wynosi **0.5–1.5% całkowitego portfela**. Wszelkie transakcje powinny być realizowane wyłącznie za pomocą zleceń z limitem ceny (Limit/Post-Only), unikając egzekucji rynkowych w celu eliminacji poślizgu.
-
----
-
-🎯 CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA
-
-**ARB-USDT**
-- **Opis układu:** Zakończenie wielotygodniowej fali spadkowej w sekwencji niższych szczytów (LH) z widocznym wyczerpaniem impetu niedźwiedzi oraz wyprzedaniem na RSI/MACD w rejonie lokalnego dołka.
-- **Strefa Wejścia (Entry):** $0.1850 - $0.1980
-- **Stop Loss (SL):** $0.1690
-- **Take Profit (TP):** $0.2450 - $0.2800
-- **Bezpieczne widełki pozycji (Safe Position Size):** 1.5% - 2.5% kapitału
+#### Struktura Płynności i Zachowanie Animatorów:
+1. **Dystrybucja Sell-Side Liquidity (SSL) i Buy-Side Liquidity (BSL):**
+   * Pula płynności po stronie kupujących (BSL) jest silnie skumulowana powyżej psychologicznego oporu $83,500 – $84,200. Jest to naturalny cel dla lokalnego rajdu likwidacyjnego (Short Squeeze).
+   * Sell-side liquidity (SSL) znajduje się bezpośrednio pod lokalnym dołkiem w strefie $80,800 – $81,200. Spadek poniżej tego zakresu aktywuje zlecenia stop-loss pozycji długich, które stanowią strefę płynnego wejścia dla kapitału instytucjonalnego.
+2. **Order Flow & Wolumen:**
+   * Różnica wyceny między parami BTC-USDT ($82,180.70) a BTC-USDC ($82,101.20) tworzy okno spreadowe na poziomie blisko $80. Świadczy to o zwiększonym popycie na USDT ze strony traderów poszukujących natychmiastowej ekspozycji na instrumenty pochodne.
+   * Animatorzy rynku absorbują zlecenia sprzedaży w rejonie $81,500 – $82,000, budując lokalny Order Block popytowy na interwale H4. Dopóki dzienne zamknięcie utrzymuje się powyżej $80,500, struktura rynkowa faworyzuje kontynuację ruchu w kierunku $84,500.
 
 ---
 
-**TIA-USDT**
-- **Opis układu:** Długoterminowa korekta po strukturze LH doprowadziła kurs do skrajnych odczytów wyprzedania na oscylatorach, tworząc bazę pod techniczne odreagowanie przy psychologicznym wsparciu $0.60.
-- **Strefa Wejścia (Entry):** $0.5850 - $0.6120
-- **Stop Loss (SL):** $0.5400
-- **Take Profit (TP):** $0.7600 - $0.8800
-- **Bezpieczne widełki pozycji (Safe Position Size):** 1.0% - 2.0% kapitału
+### 3. Starknet (STRK) – Ocena Strukturalna L2
+* **Kontekst Rynkowy:** W cieniu wyceny Ethereum ($2,415) ekosystem Starknet zmaga się z odpływem części rotacyjnego kapitału. 
+* **Dynamika Smart Money:** Na arkuszach zleceń widoczna jest stopniowa kompresja zmienności. Brak gwałtownych zrzutów wolumenu ze strony wczesnych inwestorów wskazuje, że faza dystrybucji została wstrzymana na rzecz akumulacji pasywnej.
+* **Kluczowa Strefa:** Spadek aktywności na tokenach L2 tworzy asymetrię ryzyka do zysku. Animatorzy utrzymują wąskie spready, absorbując płynność w rejonach wielotygodniowych dołków. Wybicie powyżej lokalnych węzłów wolumenowych (High Volume Nodes) będzie bezpośrednio skorelowane z impulsem na parze ETH-USDT powyżej $2,500.
 
 ---
 
-**ADA-USDT**
-- **Opis układu:** Wielotygodniowy ruch spadkowy testuje kluczową strefę popytową $0.21 - $0.22, gdzie wygasający wolumen sprzedających oraz bycze dywergencje na wskaźnikach momentum sygnalizują potencjalne odwrócenie.
-- **Strefa Wejścia (Entry):** $0.2120 - $0.2210
-- **Stop Loss (SL):** $0.1980
-- **Take Profit (TP):** $0.2650 - $0.2950
-- **Bezpieczne widełki pozycji (Safe Position Size):** 2.0% - 3.0% kapitału
+### 4. Sonic (S / S-USDC) – Wycena i Płynność Nowej Architektury
+* **Kontekst Architektury:** Przejście sieci Fantom w kierunku technologii Sonic skupia uwagę kapitału polującego na wysoką przepustowość transakcyjną (TPS) i natywną wydajność maszyny wirtualnej.
+* **Pozycjonowanie Animatorów na Parze S-USDC:**
+  * Wycena w parze do USDC wskazuje na dominację kapitału instytucjonalnego i DeFi, redukując ryzyko premii spekulacyjnej obecnej na parach USDT.
+  * Arkusze zleceń na parach Sonic wykazują koncentrację zleceń kupna (Bid Walls) w strefach retestu dawnych oporów technicznych. Smart Money wykorzystuje wolniejsze dni rynkowe do wyciągania płynności z pul AMM na rzecz scentralizowanych orderbooków, przygotowując grunt pod rynkową ekspansję pod narrację premierową i airdropową.
+
+===SEPARATOR===
+
+## CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA (OKX)
+
+Selekcja setupów oparta jest wyłącznie na twardych strukturach rynkowych (węzły wolumenowe, order blocki, pule likwidacyjne) zintegrowanych z metrykami płynnościowymi OKX.
+
+---
+
+### SETUP 1: Solana (SOL-USDT)
+* **Cena referencyjna:** $104.49
+* **Wolumen 24h:** $63,276,791
+* **Profil Wolumenowy:** Bardzo wysoka płynność bazowa, minimalne poślizgi cenowe (slippage).
+
+```
+Struktura: Bullish Re-accumulation / Sweep lokalnego SSL
+Strefa Wejścia (Entry): $101.80 - $103.50 (H4 Bullish Order Block + FVG)
+Stop Loss: $98.40 (Poniżej kluczowego wsparcia strukturalnego i płynności $100.00)
+Take Profit 1 (TP1): $109.80 (Lokalny szczyt płynnościowy)
+Take Profit 2 (TP2): $115.50 (Niewypełniona nierównowaga podażowa H12)
+```
+
+* **Safe Position Size:** 
+  * Z uwagi na dzienny obrót na poziomie $63.2M, rynek jest w stanie przyjąć pozycje o wielkości do $60,000 – $120,000 bez generowania zauważalnego śladu wolumenowego (Market Impact < 0.15% obrotu godzinowego).
+  * Maksymalne dopuszczalne ryzyko na pojedynczą transakcję (R): 1.0% – 1.5% całkowitej alokacji portfelowej.
+
+---
+
+### SETUP 2: NEAR Protocol (NEAR-USDT)
+* **Cena referencyjna:** $4.943
+* **Wolumen 24h:** $23,766,426
+* **Profil Wolumenowy:** Średnio-wysoka płynność, podatność na intradayowe zlecenia typu iceberg.
+
+```
+Struktura: S/R Flip połączony z obroną Value Area Low (VAL)
+Strefa Wejścia (Entry): $4.780 - $4.860 (Retest przełamanego oporu H4 i 0.618 Fib)
+Stop Loss: $4.590 (Sztywne unieważnienie pod swing low sesji azjatyckiej)
+Take Profit 1 (TP1): $5.250 (Główna strefa podażowa i pule BSL)
+Take Profit 2 (TP2): $5.680 (Kolejny makro węzeł płynności)
+```
+
+* **Safe Position Size:**
+  * Płynność 24h na poziomie $23.7M pozwala na bezpieczną wielkość pozycji w przedziale $20,000 – $45,000.
+  * Wejścia powinny być realizowane za pomocą zleceń limitowanych (Maker), aby uniknąć taker fee i rozciągnięcia spreadu w arkuszu.
+
+---
+
+### SETUP 3: Ripple (XRP-USDT)
+* **Cena referencyjna:** $1.2996
+* **Wolumen 24h:** $26,551,790
+* **Profil Wolumenowy:** Wysoka gęstość zleceń w arkuszu centralnym, obecność algorytmów arbitrażowych.
+
+```
+Struktura: Range Bound z polowaniem na płynność pod dolnym ograniczeniem konsolidacji
+Strefa Wejścia (Entry): $1.2550 - $1.2780 (Order Block popytowy po wybiciu fałszywym)
+Stop Loss: $1.2180 (Pod poziomem lokalnego zrzutu wolumenu)
+Take Profit 1 (TP1): $1.3650 (Początek strefy dystrybucyjnej H4)
+Take Profit 2 (TP2): $1.4400 (Wysięg płynności z wyższego interwału czasowego)
+```
+
+* **Safe Position Size:**
+  * Dzienny obrót rzędu $26.5M kwalifikuje instrument pod ekspozycję w przedziale $25,000 – $50,000.
+  * Z uwagi na dynamiczne wahania spreadu przy gwałtownych ruchach BTC, rekomendowane jest podzielenie strefy wejścia na 2 transze (np. 40% na $1.2780, 60% na $1.2580).
+
+---
+
+### Rekomendacja Operacyjna Market Maker Monitor:
+Zarządzanie ekspozycją na parach altcoinowych powinno uwzględniać stale rosnącą siłę relatywną Bitcoina. Wszelkie odchylenia BTC od strefy $82,000 w dół natychmiast przełożą się na poszerzenie spreadów na parach SOL, NEAR i XRP. W związku z tym egzekucja zleceń SL musi opierać się na cenie rynkowej (Mark Price), aby zapobiec wycięciu knotami płynnościowymi (Wick Hunting).
