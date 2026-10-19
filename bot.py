@@ -11,16 +11,30 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def fetch_okx_data():
-    """Pobiera dane rynkowe z OKX."""
+    """Pobiera dane rynkowe z OKX z osobnym uwzględnieniem SPOT i SWAP/PERP."""
+    all_tickers = []
+    
+    # Pobieranie rynku SPOT
     try:
-        url = "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
-        res = requests.get(url, timeout=10)
-        data = res.json()
-        if data.get("code") == "0":
-            return data.get("data", [])
+        url_spot = "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
+        res_spot = requests.get(url_spot, timeout=10)
+        data_spot = res_spot.json()
+        if data_spot.get("code") == "0":
+            all_tickers.extend(data_spot.get("data", []))
     except Exception as e:
-        print(f"Błąd pobierania danych OKX: {e}")
-    return []
+        print(f"Błąd pobierania danych OKX SPOT: {e}")
+
+    # Pobieranie rynku SWAP (Perpetual / X-Perp dla STRK itp.)
+    try:
+        url_swap = "https://www.okx.com/api/v5/market/tickers?instType=SWAP"
+        res_swap = requests.get(url_swap, timeout=10)
+        data_swap = res_swap.json()
+        if data_swap.get("code") == "0":
+            all_tickers.extend(data_swap.get("data", []))
+    except Exception as e:
+        print(f"Błąd pobierania danych OKX SWAP: {e}")
+
+    return all_tickers
 
 def send_telegram_message(message):
     """Wysyła wiadomość bezpośrednio na Twój czat Telegram."""
@@ -40,31 +54,46 @@ def send_telegram_message(message):
         print(f"Błąd wysyłki na Telegram: {e}")
 
 def run_analysis():
-    # Pobranie surowych danych rynkowych
+    # Pobranie surowych danych rynkowych (SPOT + SWAP)
     raw_tickers = fetch_okx_data()
     
-    # Przygotowanie skróconego podsumowania danych dla Gemini
-    top_tickers = []
-    for item in raw_tickers[:40]:  # Główna część rynku pod kątem płynności
-        top_tickers.append(
+    # Rozdzielenie rynku na Top Volume SPOT oraz dedykowane aktywa (STRK i Sonic)
+    spot_tickers = [item for item in raw_tickers if "-USDT" in item.get('instId', '') or "-USDC" in item.get('instId', '')]
+    
+    # Wyciągnięcie top 40 najbardziej płynnych aktywów SPOT
+    top_volume_spot = spot_tickers[:40]
+    
+    # Osobne, bezwarunkowe wyciągnięcie pozycji dla STRK (STRKUSD UM X-Perp / STRK-USD-SWAP) oraz Sonic (S/USDC / S-USDC / S-USDT)
+    mandatory_assets = [
+        item for item in raw_tickers 
+        if any(target in item.get('instId', '').upper() for target in ["STRK", "S-USDC", "S-USDT", "SONIC"])
+    ]
+    
+    # Połączenie topowych aktywów z wymuszonymi aktywami (bez powtórzeń)
+    final_tickers_list = top_volume_spot + [item for item in mandatory_assets if item not in top_volume_spot]
+
+    tickers_summary = []
+    for item in final_tickers_list:
+        tickers_summary.append(
             f"Symbol: {item.get('instId')}, Price: {item.get('last')}, "
             f"24h High: {item.get('high24h')}, 24h Low: {item.get('low24h')}, "
             f"Vol24h: {item.get('volCcy24h')}"
         )
     
-    tickers_summary = "\n".join(top_tickers)
+    tickers_text = "\n".join(tickers_summary)
 
     prompt = f"""
 Przeanalizuj poniższe dane rynkowe z giełdy OKX dla tradera dysponującego kapitałem $20k–$30k USD.
 
 Zasady analizy jakościowej:
 1. Zweryfikuj korelację z Bitcoinem (BTC) jako makro-kotwicą rynku.
-2. Przeanalizuj pozycję Starknet (STRK) pod kątem aktualnego statusu i potencjału.
-3. Filtruj altcoiny pod kątem wielotygodniowych korekt cenowych od struktur HH/LH, skrajnych odczytów wskaźników oraz potencjalnych dywergencji.
-4. Wybierz tylko układy o wysokim prawdopodobieństwie sukcesu.
+2. DEDYKOWANA AUDYTU STRK (STRKUSD UM X-Perp / STRK-USD-SWAP): Przeanalizuj pozycję Starknet (STRK) na podstawie dostarczonych danych rynkowych pod kątem aktualnego statusu, struktury i potencjału.
+3. DEDYKOWANA AUDYTU SONIC (S/USDC lub S/USDT): Przeanalizuj pozycję Sonic (S) na podstawie dostarczonych danych pod kątem struktury cenowej i potencjału.
+4. Filtruj pozostałe altcoiny pod kątem wielotygodniowych korekt cenowych od struktur HH/LH, skrajnych odczytów wskaźników oraz potencjalnych dywergencji.
+5. Wybierz tylko układy o wysokim prawdopodobieństwie sukcesu.
 
 Dane rynkowe:
-{tickers_summary}
+{tickers_text}
 
 Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami dla sesji, sformatowany estetycznie pod czytanie na telefonie.
 """
@@ -80,10 +109,9 @@ Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami 
     print("Analiza ukończona.")
 
     # Formatowanie wiadomości pod Telegram
-    header = "🚨 *Raport Rynkowy AI — Monitoring OKX & STRK*\n\n"
+    header = "🚨 *Raport Rynkowy AI — Monitoring OKX, STRK & SONIC*\n\n"
     full_message = header + report_text
     
-    # Zabezpieczenie przed limitem długości wiadomości Telegrama (4000 znaków)
     if len(full_message) > 4000:
         full_message = full_message[:3900] + "\n\n*(Wiadomość przycięta ze względu na limit długości)*"
 
