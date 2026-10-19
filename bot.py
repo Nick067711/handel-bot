@@ -31,23 +31,19 @@ def upload_to_ftp(content_text, remote_filename="latest_report.txt"):
 
         print(f"[FTP] Łączenie z serwerem FTP: {FTP_HOST}...")
         with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
-            
-            # Przechodzimy do odpowiedniego katalogu publicznego strony
-            target_dir = "domains/piwecki.pl/public_html" # Jeśli Twój folder to public_html (z 'html' na końcu), zmień tutaj
-            # (Uwaga: jeśli na serwerze katalog nazywa się dokładnie 'public.html', zostaw tak jak poniżej)
-            
+            # Domyślna ścieżka do publicznego katalogu domeny
+            target_dir = "domains/piwecki.pl/public_html"
             print(f"[FTP] Przechodzę do katalogu: {target_dir}")
+            
             try:
                 ftp.cwd(target_dir)
             except Exception as e:
-                print(f"[FTP BŁĄD] Nie znaleziono katalogu {target_dir}: {e}")
-                return
+                print(f"[FTP WARN] Nie udało się przejść do {target_dir} ({e}). Próbuję wgrywać w bieżącym katalogu.")
 
-            # Wysyłka pliku
             with open(local_temp_file, "rb") as file_to_send:
                 ftp.storbinary(f"STOR {remote_filename}", file_to_send)
-                
-        print(f"[FTP] Sukces! Plik {remote_filename} został pomyślnie wysłany do {target_dir}.")
+
+        print(f"[FTP] Sukces! Plik {remote_filename} został pomyślnie wysłany na FTP.")
     except Exception as e:
         print(f"[FTP BŁĄD] Nie udało się wysłać pliku na FTP: {e}")
     finally:
@@ -87,7 +83,6 @@ def fetch_okx_market_data():
         res = requests.get(url, timeout=10).json()
         if res.get("code") == "0":
             data = res.get("data", [])
-            # Filtrujemy pary USDT/USDC pod kątem najwyższego wolumenu
             sorted_data = sorted(data, key=lambda x: float(x.get("volCcy24h", 0)), reverse=True)
             top_pairs = []
             for item in sorted_data[:15]:
@@ -127,11 +122,10 @@ Zasady i Guardraile:
 Sformatuj odpowiedź wyraźnie rozdzielając CZĘŚĆ 1 i CZĘŚĆ 2 za pomocą separatora ===SEPARATOR===.
 """
 
-response = client.models.generate_content(
+    response = client.models.generate_content(
         model="gemini-3.8-flash",
         contents=prompt
     )
-    
     return response.text
 
 # ==========================================
@@ -154,7 +148,6 @@ def main():
         parts = report_text.split("===SEPARATOR===")
         part1 = parts[0].strip()
         part2 = parts[1].strip()
-        
         send_telegram_message(f"--- CZĘŚĆ 1 ---\n\n{part1}")
         send_telegram_message(f"--- CZĘŚĆ 2 ---\n\n{part2}")
     else:
