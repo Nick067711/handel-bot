@@ -1,41 +1,45 @@
 RAPORT RYNKOWY: MARKET MAKER MONITOR
-Data analizy: 2025
 
-1. KONDYCJA RYNKU
-Rynek kryptowalut znajduje się w fazie lokalnej konsolidacji na wysokich poziomach cenowych. Kluczowe metryki on-chain dla sieci Bitcoin wykazują ekstremalną siłę fundamentalną – hashrate osiąga bezprecedensowy poziom około 1,027 EH/s (1.027 ZettaHash/s), co dowodzi bezwzględnego zaangażowania górników i rozbudowy infrastruktury. 
+KONDYCJA RYNKU
 
-Wolumen dobowy na poziomie około $446,777,716 sugeruje chwilowe wygaszenie agresywnych zleceń rynkowych (taker volume), co sprzyja działaniom animatorów rynku (Market Makers) skupionym na polowaniu na płynność w wąskich zakresach cenowych. Dobowa liczba transakcji (529,763) potwierdza stabilne, wysokie wykorzystanie sieci bazowej.
+Rynek kryptowalut znajduje się w fazie konsolidacji na wysokich poziomach cenowych. Bitcoin stabilizuje się w rejonie $82,595. Fundamenty sieci pozostają na rekordowych poziomach – hashrate przekracza 1,027 EH/s (1,027,258,693 TH/s), a wysoka liczba transakcji (ponad 529 tysięcy w ciągu 24h) potwierdza intensywną aktywność on-chain. Wolumen obrotu BTC na poziomie około $446.9 mln sygnalizuje chwilowe wygaszenie presji kierunkowej i akumulację płynności przez animatorów rynku przed kolejnym impulsem zmienności.
 
-2. BITCOIN & SMART MONEY
-- Kurs BTC: $82,564.60
-- Wolumen 24h: $446,777,716.30
 
-Smart Money wykorzystuje obecny poziom cenowy do absorpcji podaży bez wywoływania gwałtownych ruchów kierunkowych. Poziom $82,000 stanowi lokalne pasywne wsparcie zleceń kupna typu limit. Brak gwałtownego wolumenu wskazuje na kompresję zmienności, która historycznie poprzedza impuls kierunkowy. Kluczowy opór płynnościowy znajduje się w rejonie $84,500 - $85,000, natomiast strefa obrony popytu to $81,200 - $80,500.
+BTC & SMART MONEY
 
-3. ANALIZA PROJEKTÓW: STRK ORAZ SONIC (S)
+- Aktualna cena: $82,595.10
+- Analiza przepływów: Smart Money utrzymuje kontrolę nad strukturą makro, absorbując podaż powyżej kluczowej psychologicznej bariery $80,000. Kompresja wolumenu przy jednoczesnym utrzymaniu wysokiego poziomu hashrate i stałej liczby transakcji wskazuje na lokalne wyczekiwanie na impuls zewnętrzny.
+- Poziomy techniczne: Główne wsparcie płynnościowe znajduje się w strefie $80,500 - $81,200. Najbliższy opór z perspektywy księgi zleceń leży w okolicach $84,000 - $85,000.
 
-- Starknet (STRK) - Kurs: $0.0584
-STRK znajduje się w fazie głębokiej kompresji cenowej po długotrwałym trendzie spadkowym. Z perspektywy animatora rynku, tak niska wycena oznacza wysuszenie wolumenu sprzedaży detalicznej. Obserwujemy pasywną akumulację w przedziale $0.0550 - $0.0580. Wybicie powyżej $0.0620 może wywołać kaskadę likwidacji pozycji krótkich (short squeeze).
 
-- Sonic (S) - Kurs: $0.0546
-Token S porusza się w wąskim korytarzu cenowym, korelując z ruchami STRK pod kątem skali wyceny. Rynek testuje cierpliwość inwestorów detalicznych. Niski spread i mała płynność w arkuszu zleceń sprawiają, że relatywnie niewielki kapitał instytucjonalny może doprowadzić do dynamicznego rajdu w kierunku $0.0700.
+STARKNET (STRK)
 
-4. PROPOZYCJE ROZGRANIA RYNKU (ALTCOIN SETUPS)
+- Aktualna cena: $0.05842
+- Analiza: Token porusza się w strefie akumulacji w rejonie wielomiesięcznych dołków. Niski poziom zmienności sprzyja formowaniu lokalnego dna, jednak do wygenerowania trwałego trendu wzrostowego rynek potrzebuje zdecydowanego napływu świeżego wolumenu. Kluczowy opór krótkoterminowy to $0.0650.
 
-Setup 1: Starknet (STRK) - Reversal / Mean Reversion
+
+SONIC (S)
+
+- Aktualna cena: $0.05468
+- Analiza: Sonic testuje strefę płynności po ostatnich spadkach. Wyprzedanie wskaźników technicznych stwarza okazję do lokalnego odreagowania w ramach technicznej korekty wzrostowej, pod warunkiem obrony wsparcia na poziomie $0.0510.
+
+
+PROPOZYCJE ALTCOINOWE (SET-UPY HANDLOWE)
+
+1. Starknet (STRK/USDT) - Swing Long (gra pod odbicie z akumulacji)
 - Strefa wejścia (Entry): $0.0560 - $0.0585
-- Stop Loss (SL): $0.0515 (poniżej lokalnych dołków płynnościowych)
-- Take Profit (TP): TP1: $0.0680 | TP2: $0.0790
-- Bezpieczny rozmiar pozycji (Safe Position Size): 1.5% - 2.0% całkowitego portfela
+- Stop Loss (SL): $0.0520
+- Take Profit (TP): TP1: $0.0670 | TP2: $0.0780
+- Bezpieczny rozmiar pozycji: 1.5% - 2.0% całkowitego portfela
 
-Setup 2: Sonic (S) - Liquidity Sweep & Expansion
-- Strefa wejścia (Entry): $0.0525 - $0.0545
-- Stop Loss (SL): $0.0480
-- Take Profit (TP): TP1: $0.0650 | TP2: $0.0740
-- Bezpieczny rozmiar pozycji (Safe Position Size): 1.0% - 1.5% całkowitego portfela (zwiększona ostrożność ze względu na mniejszą głębokość arkusza)
+2. Sonic (S/USDT) - Rebound Long (gra na odzyskanie płynności)
+- Strefa wejścia (Entry): $0.0530 - $0.0550
+- Stop Loss (SL): $0.0495
+- Take Profit (TP): TP1: $0.0620 | TP2: $0.0715
+- Bezpieczny rozmiar pozycji: 1.0% - 1.5% całkowitego portfela
 
-Setup 3: Chainlink (LINK) - Momentum Play (zabezpieczenie na aktywie o wyższej płynności)
-- Strefa wejścia (Entry): $13.80 - $14.20
-- Stop Loss (SL): $12.90
-- Take Profit (TP): TP1: $15.80 | TP2: $17.50
-- Bezpieczny rozmiar pozycji (Safe Position Size): 3.0% - 4.0% całkowitego portfela
+3. Sui (SUI/USDT) - Trend Continuation Long
+- Strefa wejścia (Entry): $2.05 - $2.15
+- Stop Loss (SL): $1.89
+- Take Profit (TP): TP1: $2.48 | TP2: $2.80
+- Bezpieczny rozmiar pozycji: 2.0% całkowitego portfela
