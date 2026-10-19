@@ -194,7 +194,6 @@ def upload_html_to_ftp(html_content):
 # --- GŁÓWNA PĘTLA PROGRAMU ---
 async def main():
     async with aiohttp.ClientSession() as session:
-        # Pobieramy interwały: 1h, 4h, 1d, 1w
         intervals = ["1h", "4h", "1d", "1w"]
         
         btc_data = {}
@@ -220,7 +219,17 @@ async def main():
         await asyncio.sleep(1)
         await send_telegram(part2)
         
-        # Generowanie HTML
+        # Generowanie HTML - przygotowanie wierszy w osobnych zmiennych dla bezpieczeństwa składni
+        btc_rows = ""
+        for bar in intervals:
+            d = btc_data[bar]
+            btc_rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: {d["ema20"]} | EMA50: {d["ema50"]}</div>\n'
+
+        strk_rows = ""
+        for bar in intervals:
+            d = strk_data[bar]
+            strk_rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: {d["ema20"]} | EMA50: {d["ema50"]}</div>\n'
+
         html_content = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -252,12 +261,12 @@ async def main():
         
         <div class="tech-box">
             <h3>BTC (Bitcoin)</h3>
-            {''.join([f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${btc_data[bar]["close"]} | RSI: {btc_data[bar]["rsi"]} | StochRSI K: {btc_data[bar]["stoch_k"]} | MACD Hist: {btc_data[bar]["macd_hist"]} | EMA20: {btc_data[bar]["ema20"]} | EMA50: {btc_data[bar]["ema50"]}</div>' for bar in intervals])}
+            {btc_rows}
         </div>
 
         <div class="tech-box">
             <h3>STRK (Starknet)</h3>
-            {''.join([f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${strk_data[bar]["close"]} | RSI: {strk_data[bar]["rsi"]} | StochRSI K: {strk_data[bar]["stoch_k"]} | MACD Hist: {strk_data[bar]["macd_hist"]} | EMA20: {strk_data[bar]["ema20"]} | EMA50: {strk_data[bar]["ema50']}</div>' for bar in intervals])}
+            {strk_rows}
         </div>
     </div>
 </body>
