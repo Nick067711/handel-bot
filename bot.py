@@ -1,5 +1,6 @@
 import os
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import requests
@@ -27,7 +28,7 @@ def fetch_okx_data():
     return []
 
 def send_email(subject, body):
-    """Wysyła wiadomość e-mail przez Gmail SMTP (port 465 SSL)."""
+    """Wysyła wiadomość e-mail przez Gmail SMTP z jawnym kontekstem SSL."""
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_USER
@@ -36,11 +37,13 @@ def send_email(subject, body):
 
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        # Użycie SMTP_SSL na porcie 465 – stabilniejsze w chmurze GitHub Actions
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(SMTP_USER, SMTP_PASS)
-        server.send_message(msg)
-        server.quit()
+        # Tworzenie bezpiecznego kontekstu SSL dla środowiska chmurowego
+        context = ssl.create_default_context()
+        
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, context=context) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.send_message(msg)
+            
         print("E-mail został pomyślnie wysłany!")
     except Exception as e:
         print(f"Błąd wysyłki e-mail: {e}")
