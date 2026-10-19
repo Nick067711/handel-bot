@@ -1,28 +1,41 @@
-name: Crypto Market AI Bot
+name: Market Maker Monitor Schedule
 
 on:
   schedule:
-    - cron: '0 7,15 * * *' # Uruchomienie o 7:00 UTC (8:00 PL) oraz 15:00 UTC (16:00 PL)
-  workflow_dispatch:    # Przycisk do ręcznego odpalenia w każdej chwili
+    # Uruchamianie wg potrzeb (np. co 6 godzin)
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - name: Pobierz kod z repozytorium
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Konfiguracja Pythona
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Instalacja bibliotek
-        run: pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Uruchomienie bota i analiza AI
+      - name: Run Market Maker Bot
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          FTP_HOST: ${{ secrets.FTP_HOST }}
+          FTP_USER: ${{ secrets.FTP_USER }}
+          FTP_PASS: ${{ secrets.FTP_PASS }}
         run: python bot.py
+
+      - name: Commit and push latest report if changed
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add latest_report.md
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Automatyczna aktualizacja latest_report.md [skip ci]" && git push)
