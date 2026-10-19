@@ -7,37 +7,42 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-# 2. Inicjalizacja klienta Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def fetch_okx_data():
-    """Pobiera WSZYSTKIE dane rynkowe z OKX (SPOT + SWAP/PERP)."""
+    """Pobiera dane rynkowe SPOT i SWAP z OKX."""
     all_tickers = []
-    
-    # Pobieranie rynku SPOT
     try:
-        url_spot = "https://www.okx.com/api/v5/market/tickers?instType=SPOT"
-        res_spot = requests.get(url_spot, timeout=15)
-        data_spot = res_spot.json()
-        if data_spot.get("code") == "0":
-            all_tickers.extend(data_spot.get("data", []))
+        res_spot = requests.get("https://www.okx.com/api/v5/market/tickers?instType=SPOT", timeout=15).json()
+        if res_spot.get("code") == "0":
+            all_tickers.extend(res_spot.get("data", []))
     except Exception as e:
-        print(f"Błąd pobierania danych OKX SPOT: {e}")
+        print(f"Błąd OKX SPOT: {e}")
 
-    # Pobieranie rynku SWAP
     try:
-        url_swap = "https://www.okx.com/api/v5/market/tickers?instType=SWAP"
-        res_swap = requests.get(url_swap, timeout=15)
-        data_swap = res_swap.json()
-        if data_swap.get("code") == "0":
-            all_tickers.extend(data_swap.get("data", []))
+        res_swap = requests.get("https://www.okx.com/api/v5/market/tickers?instType=SWAP", timeout=15).json()
+        if res_swap.get("code") == "0":
+            all_tickers.extend(res_swap.get("data", []))
     except Exception as e:
-        print(f"Błąd pobierania danych OKX SWAP: {e}")
+        print(f"Błąd OKX SWAP: {e}")
 
     return all_tickers
 
+def fetch_btc_onchain_data():
+    """Pobiera darmowe wskaźniki makro i derywaty dla BTC."""
+    onchain_info = {}
+    try:
+        res = requests.get("https://api.blockchain.info/stats", timeout=10).json()
+        onchain_info['hash_rate'] = res.get('hash_rate')
+        onchain_info['n_tx'] = res.get('n_tx')
+        onchain_info['market_price_usd'] = res.get('market_price_usd')
+    except Exception as e:
+        print(f"Błąd pobierania danych on-chain BTC: {e}")
+        
+    return onchain_info
+
 def send_telegram_message(message):
-    """Wysyła wiadomość bezpośrednio na Twój czat Telegram."""
+    """Wysyła wiadomość bezpośrednio na Telegram."""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
@@ -54,78 +59,76 @@ def send_telegram_message(message):
         print(f"Błąd wysyłki na Telegram: {e}")
 
 def run_analysis():
-    # Pobranie WSZYSTKICH surowych danych rynkowych
     raw_tickers = fetch_okx_data()
-    
+    btc_onchain = fetch_btc_onchain_data()
+
     tickers_summary = []
     for item in raw_tickers:
         tickers_summary.append(
             f"Symbol: {item.get('instId')}, Price: {item.get('last')}, "
-            f"24h High: {item.get('high24h')}, 24h Low: {item.get('low24h')}, "
-            f"Vol24h: {item.get('volCcy24h')}"
+            f"High24h: {item.get('high24h')}, Low24h: {item.get('low24h')}, Vol24h: {item.get('volCcy24h')}"
         )
     
     tickers_text = "\n".join(tickers_summary)
 
-    # KROK 1: Wstępna pełna analiza rynkowa
-    prompt_step1 = f"""
-Przeanalizuj CAŁOŚCIOWE dane rynkowe z giełdy OKX dla tradera dysponującego kapitałem $20k–$30k USD.
+    prompt = f"""
+Jesteś starszym analitykiem krypto. Twoim zadaniem jest stworzyć zwięzły, niezwykle czytelny raport w języku polskim, podzielony NA DWIE OSOBNE CZĘŚCI (rozdzielone znacznikiem `---SPLIT---`).
 
-Zasady analizy:
-1. Zweryfikuj korelację z Bitcoinem (BTC-USDT) jako makro-kotwicą całego rynku.
-2. DEDYKOWANA ANALIZA STRK: Przeanalizuj Starknet (STRK) na podstawie danych pod kątem aktualnego statusu, struktury i potencjału.
-3. DEDYKOWANA ANALIZA SONIC (S/USDC / pary S): Przeanalizuj sytuację Sonic ściśle na podstawie faktycznych danych z tabeli. 
-   - BEZWZGLĘDNIE ZAKAZANE JEST wspominanie o jakichkolwiek "podróbkach", memecoinach czy klonach.
-4. Przeskanuj WSZYSTKIE pozostałe altcoiny z listy pod kątem wielotygodniowych korekt od struktur HH/LH, skrajnych odczytów wskaźników oraz potencjalnych dywergencji.
-5. Wybierz wyłącznie układy o wysokim prawdopodobieństwie sukcesu, odpowiadające kapitałowi $20k–$30k.
+NIE narzucaj sztywnego kapitału. Zamiast tego dla każdego omawianego aktywa podaj **bezpieczne widełki wielkości pozycji / płynności** w oparciu o jego rzeczywisty wolumen na OKX, aby uniknąć poślizgu cenowego.
 
-Pełne dane rynkowe OKX:
+Dane On-Chain / Makro BTC:
+{btc_onchain}
+
+Dane rynkowe OKX:
 {tickers_text}
 
-Wygeneruj wstępny raport rynkowy.
+WYMAGANA STRUKTURA ODPOWIEDZI:
+
+CZĘŚĆ 1 (Kondycja Rynku & Kluczowe Aktywa):
+1. 🪙 **BITCOIN & SMART MONEY**:
+   - Kondycja makro BTC, cena, opór/wsparcie i sentyment dużych graczy.
+   - **Bezpieczne widełki pozycji**: Sugestia wielkości zaangażowania bazująca na płynności BTC.
+2. ⚡ **STARKNET (STRK)**:
+   - Status strukturalny i rekomendacja.
+   - **Bezpieczne widełki pozycji**: Maksymalna sugerowana wielkość wejścia bazująca na wolumenie SWAP/SPOT STRK.
+3. 🌀 **SONIC (S / S/USDC)**:
+   - Analiza wyłącznie właściwej pary S z danych źródłowych (zakaz pisania o podróbkach).
+   - **Bezpieczne widełki pozycji**: Ocena płynności i zalecany bezpieczny przedział kapitału na transakcję.
+
+---SPLIT---
+
+CZĘŚĆ 2 (Top Okazje Altcoinowe - Maksymalnie 2-3 projekty):
+Wybierz TYLKO 2-3 najsilniejsze układy z całego rynku OKX.
+Dla każdego z nich podaj:
+- **Symbol** i opis układu (1 zdanie)
+- **Strefa Wejścia (Entry)**
+- **Stop Loss (SL)**
+- **Take Profit (TP)**
+- **Bezpieczne widełki pozycji**: Sugerowany przedział kapitału wejściowego dla tego konkretnego tokena wynikający z jego wolumenu 24h.
+
+Jeśli brak układów, napisz: "Brak bezpiecznych konfiguracji altcoinowych dla obecnej sesji."
 """
 
-    print("Generowanie pełnej analizy AI (cały rynek OKX)...")
-    response1 = client.models.generate_content(
+    print("Generowanie raportu AI bez sztywnych ram kapitałowych...")
+    response = client.models.generate_content(
         model='gemini-3.8-flash',
-        contents=prompt_step1,
-    )
-    draft_report = response1.text
-
-    # KROK 2: Automatyczny audyt sam siebie (Fact-checking loop)
-    prompt_step2 = f"""
-Jesteś rygorystycznym audytorem finansowym i fact-checkerem. Sprawdź poniższy szkic raportu pod kątem błędu halucynacji (zmyślania danych).
-
-Oto oryginalne, pełne dane źródłowe z giełdy OKX:
-{tickers_text}
-
-Oto wstępny szkic raportu do weryfikacji:
-{draft_report}
-
-Zasady audytu:
-1. Upewnij się, że analiza makro dla Bitcoina (BTC) opiera się na danych z arkusza.
-2. Zweryfikuj każdą cenę i wolumen w szkicu z danymi źródłowymi. Skoryguj wszelkie zmyślone liczby.
-3. Dla Sonic (S / S/USDC): Upewnij się, że opiera się ściśle na rzeczywistym wolumenie z tabeli. BEZWZGLĘDNIE ZAKAZANE jest jakiekolwiek wspominanie o "podróbkach" lub ostrzeganie przed klonami.
-4. Wygeneruj ostateczny, czysty, w pełni zweryfikowany raport w języku polskim, gotowy do wysyłki na Telegram.
-"""
-
-    print("Przeprowadzanie automatycznego audytu (self-correction)...")
-    response2 = client.models.generate_content(
-        model='gemini-3.8-flash',
-        contents=prompt_step2,
+        contents=prompt,
     )
     
-    final_report = response2.text
-    print("Analiza i audyt ukończone.")
+    full_text = response.text
 
-    # Formatowanie wiadomości pod Telegram
-    header = "🚨 *Pełny Raport Rynkowy AI (Zweryfikowany) — OKX, STRK & SONIC*\n\n"
-    full_message = header + final_report
-    
-    if len(full_message) > 4000:
-        full_message = full_message[:3900] + "\n\n*(Wiadomość przycięta ze względu na limit długości)*"
+    if "---SPLIT---" in full_text:
+        part1, part2 = full_text.split("---SPLIT---", 1)
+    else:
+        part1 = full_text
+        part2 = ""
 
-    send_telegram_message(full_message)
+    header1 = "📊 *CZĘŚĆ 1: KONDYCJA RYNKU, BTC, STRK & SONIC*\n\n"
+    send_telegram_message(header1 + part1.strip())
+
+    if part2.strip():
+        header2 = "🎯 *CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA*\n\n"
+        send_telegram_message(header2 + part2.strip())
 
 if __name__ == "__main__":
     run_analysis()
