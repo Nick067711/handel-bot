@@ -62,73 +62,103 @@ def run_analysis():
     raw_tickers = fetch_okx_data()
     btc_onchain = fetch_btc_onchain_data()
 
-    tickers_summary = []
+    # Filtrowanie i porządkowanie głównych aktywów (SPOT z USDT/USDC)
+    relevant_tickers = []
     for item in raw_tickers:
-        tickers_summary.append(
+        inst_id = item.get('instId', '')
+        if inst_id.endswith("-USDT") or inst_id.endswith("-USDC") or "-USDT-" in inst_id or "-USDC-" in inst_id:
+            try:
+                vol = float(item.get('volCcy24h', 0))
+            except (ValueError, TypeError):
+                vol = 0
+            relevant_tickers.append((vol, item))
+
+    # Sortowanie po wolumenie malejąco
+    relevant_tickers.sort(key=lambda x: x[0], reverse=True)
+    sorted_items = [t[1] for t in relevant_tickers]
+
+    # Przygotowanie tekstu pod kluczowe pozycje
+    key_assets = [item for item in sorted_items if any(k in item.get('instId', '').upper() for k in ["BTC", "STRK", "S-USDC", "S-USDT", "S/USDC", "SONIC"])]
+    
+    key_summary = []
+    for item in key_assets:
+        key_summary.append(
             f"Symbol: {item.get('instId')}, Price: {item.get('last')}, "
             f"High24h: {item.get('high24h')}, Low24h: {item.get('low24h')}, Vol24h: {item.get('volCcy24h')}"
         )
-    
-    tickers_text = "\n".join(tickers_summary)
+    key_text = "\n".join(key_summary)
 
-    prompt = f"""
-Jesteś starszym analitykiem krypto. Twoim zadaniem jest stworzyć zwięzły, niezwykle czytelny raport w języku polskim, podzielony NA DWIE OSOBNE CZĘŚCI (rozdzielone znacznikiem `---SPLIT---`).
+    # --- ZAPYTANIE 1: KONDYCJA RYNKU, BTC, STRK & SONIC ---
+    prompt1 = f"""
+Jesteś analitykiem krypto. Stwórz czytelną, zwięzłą CZĘŚĆ 1 raportu w języku polskim dla kluczowych aktywów.
 
-NIE narzucaj sztywnego kapitału. Zamiast tego dla każdego omawianego aktywa podaj **bezpieczne widełki wielkości pozycji / płynności** w oparciu o jego rzeczywisty wolumen na OKX, aby uniknąć poślizgu cenowego.
+Dla każdego z nich określ **bezpieczne widełki pozycji/zaangażowania kapitałowego** wynikające z jego płynności na OKX.
 
-Dane On-Chain / Makro BTC:
+Dane On-Chain BTC:
 {btc_onchain}
 
-Dane rynkowe OKX:
-{tickers_text}
+Dane kluczowych aktywów OKX:
+{key_text}
 
-WYMAGANA STRUKTURA ODPOWIEDZI:
-
-CZĘŚĆ 1 (Kondycja Rynku & Kluczowe Aktywa):
+STRUKTURA:
 1. 🪙 **BITCOIN & SMART MONEY**:
-   - Kondycja makro BTC, cena, opór/wsparcie i sentyment dużych graczy.
-   - **Bezpieczne widełki pozycji**: Sugestia wielkości zaangażowania bazująca na płynności BTC.
+   - Kondycja makro BTC, sentyment i zwięzła ocena kierunku rynku.
+   - Safe Position Size (Bezpieczne widełki pozycji w USD).
 2. ⚡ **STARKNET (STRK)**:
-   - Status strukturalny i rekomendacja.
-   - **Bezpieczne widełki pozycji**: Maksymalna sugerowana wielkość wejścia bazująca na wolumenie SWAP/SPOT STRK.
+   - Ocena strukturalna i jednoznaczna decyzja (np. Akumulacja / Stay Aside).
+   - Safe Position Size.
 3. 🌀 **SONIC (S / S/USDC)**:
-   - Analiza wyłącznie właściwej pary S z danych źródłowych (zakaz pisania o podróbkach).
-   - **Bezpieczne widełki pozycji**: Ocena płynności i zalecany bezpieczny przedział kapitału na transakcję.
+   - Analiza właściwej pary S (bezwzględny zakaz pisania o podróbkach/memecoinach).
+   - Safe Position Size.
+"""
 
----SPLIT---
+    print("Generowanie Części 1 (Kondycja Rynku & Kluczowe Aktywa)...")
+    res1 = client.models.generate_content(
+        model='gemini-3.8-flash',
+        contents=prompt1,
+    )
+    
+    header1 = "📊 *CZĘŚĆ 1: KONDYCJA RYNKU, BTC, STRK & SONIC*\n\n"
+    send_telegram_message(header1 + res1.text.strip())
 
-CZĘŚĆ 2 (Top Okazje Altcoinowe - Maksymalnie 2-3 projekty):
-Wybierz TYLKO 2-3 najsilniejsze układy z całego rynku OKX.
-Dla każdego z nich podaj:
-- **Symbol** i opis układu (1 zdanie)
+    # --- ZAPYTANIE 2: TOP SELEKCJA ALTCOINOWA ---
+    # Wybieramy top 40 najbardziej płynnych altcoinów (z wyłączeniem BTC, ETH, USDT, USDC)
+    altcoins = [item for item in sorted_items if not any(k in item.get('instId', '').upper() for k in ["BTC-", "ETH-", "USDT-", "USDC-"])][:40]
+    
+    alt_summary = []
+    for item in altcoins:
+        alt_summary.append(
+            f"Symbol: {item.get('instId')}, Price: {item.get('last')}, "
+            f"High24h: {item.get('high24h')}, Low24h: {item.get('low24h')}, Vol24h: {item.get('volCcy24h')}"
+        )
+    alt_text = "\n".join(alt_summary)
+
+    prompt2 = f"""
+Jesteś analitykiem krypto. Twoim zadaniem jest przeanalizować poniższy zestaw najbardziej płynnych altcoinów z giełdy OKX i wybrać TYLKO 2 do 3 absolutnie najlepszych okazji technicznych.
+
+Zasady selekcji:
+- Szukaj aktywów po wielotygodniowych korektach od struktur HH/LH, ze skrajnymi odczytami RSI/MACD lub dywergencjami.
+- Jeśli brak dobrych układów, napisz wprost: "Brak bezpiecznych konfiguracji altcoinowych dla obecnej sesji."
+
+Lista altcoinów z OKX:
+{alt_text}
+
+STRUKTURA DLA KAŻDEGO WYBRANEGO ALTCOINA (Maksymalnie 2-3):
+- **Symbol** i opisu układu (1 zdanie)
 - **Strefa Wejścia (Entry)**
 - **Stop Loss (SL)**
 - **Take Profit (TP)**
-- **Bezpieczne widełki pozycji**: Sugerowany przedział kapitału wejściowego dla tego konkretnego tokena wynikający z jego wolumenu 24h.
-
-Jeśli brak układów, napisz: "Brak bezpiecznych konfiguracji altcoinowych dla obecnej sesji."
+- **Bezpieczne widełki pozycji**: Sugerowany przedział kapitału wynikający z płynności tokena.
 """
 
-    print("Generowanie raportu AI bez sztywnych ram kapitałowych...")
-    response = client.models.generate_content(
+    print("Generowanie Części 2 (Skaner Altcoinów)...")
+    res2 = client.models.generate_content(
         model='gemini-3.8-flash',
-        contents=prompt,
+        contents=prompt2,
     )
-    
-    full_text = response.text
 
-    if "---SPLIT---" in full_text:
-        part1, part2 = full_text.split("---SPLIT---", 1)
-    else:
-        part1 = full_text
-        part2 = ""
-
-    header1 = "📊 *CZĘŚĆ 1: KONDYCJA RYNKU, BTC, STRK & SONIC*\n\n"
-    send_telegram_message(header1 + part1.strip())
-
-    if part2.strip():
-        header2 = "🎯 *CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA*\n\n"
-        send_telegram_message(header2 + part2.strip())
+    header2 = "🎯 *CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA*\n\n"
+    send_telegram_message(header2 + res2.text.strip())
 
 if __name__ == "__main__":
     run_analysis()
