@@ -4,6 +4,7 @@ import asyncio
 import aiohttp
 import numpy as np
 from google import genai
+from google.genai.errors import APIError
 
 # --- KONFIGURACJA ŚRODOWISKOWA / API ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -149,8 +150,8 @@ async def fetch_btc_derivatives_and_onchain(session):
     return oi_data
 
 
-# --- GENEROWANIE RAPORTU PRZEZ GEMINI (STRICT MODEL: gemini-3.8-flash) ---
-async def generate_ai_analysis(tech_summary, whale_data):
+# --- GENEROWANIE RAPORTU PRZEZ GEMINI (STRICT MODEL: gemini-3.8-flash WITH RETRY LOGIC) ---
+async def generate_ai_analysis(tech_summary, whale_data, max_retries=5, initial_delay=5):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
@@ -169,22 +170,30 @@ async def generate_ai_analysis(tech_summary, whale_data):
     2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP).
     """
     
-    for attempt in range(5):
+    delay = initial_delay
+    for attempt in range(1, max_retries + 1):
         try:
             response = client.models.generate_content(
                 model="gemini-3.8-flash",
                 contents=prompt
             )
-            text = response.text
-            parts = text.split("Top Selekcja")
-            part1 = parts[0].strip()
-            part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Brak danych sekcji 2."
-            return part1, part2
+            if response and response.text:
+                text = response.text
+                parts = text.split("Top Selekcja")
+                part1 = parts[0].strip()
+                part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Brak danych sekcji 2."
+                return part1, part2
+        except APIError as e:
+            print(f"Ostrzeżenie: Błąd API Gemini (próba {attempt}/{max_retries}): {e}")
         except Exception as e:
-            print(f"Próba {attempt+1} Gemini API nieudana: {e}")
-            await asyncio.sleep(5 * (attempt + 1))
+            print(f"Próba {attempt}/{max_retries} nieudana z powodu nieoczekiwanego błędu: {e}")
+            
+        if attempt < max_retries:
+            print(f"Czekam {delay} s przed kolejną próbą zapytania Gemini...")
+            await asyncio.sleep(delay)
+            delay *= 2  # Narastające opóźnienie (5s, 10s, 20s, 40s)
 
-    return "Błąd generowania analizy (przeciążenie API Gemini).", "Spróbuj ponownie przy kolejnym uruchomieniu."
+    return "Błąd generowania analizy (przeciążenie API Gemini po wielokrotnych próbach).", "Spróbuj ponownie przy kolejnym uruchomieniu."
 
 
 # --- WYSYŁKA NA TELEGRAM ---
