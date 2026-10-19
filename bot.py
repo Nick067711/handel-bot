@@ -11,7 +11,7 @@ SMTP_USER = os.environ.get("SMTP_USER")
 SMTP_PASS = os.environ.get("SMTP_PASS")
 RECIPIENT_EMAIL = "nick06711@gmail.com"
 
-# 2. Inicjalizacja klienta Google GenAI (nowy standard)
+# 2. Inicjalizacja klienta Google GenAI
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 def fetch_okx_data():
@@ -27,7 +27,7 @@ def fetch_okx_data():
     return []
 
 def send_email(subject, body):
-    """Wysyła wiadomość e-mail przez Gmail SMTP."""
+    """Wysyła wiadomość e-mail przez Gmail SMTP (port 465 SSL)."""
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_USER
@@ -36,8 +36,8 @@ def send_email(subject, body):
 
         msg.attach(MIMEText(body, 'plain', 'utf-8'))
 
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
+        # Użycie SMTP_SSL na porcie 465 – stabilniejsze w chmurze GitHub Actions
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
         server.quit()
@@ -77,7 +77,7 @@ Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami 
 
     print("Przesyłanie danych do analizy AI...")
     
-    # Wywołanie najnowszego modelu gemini-3.8-flash
+    # Wywołanie modelu gemini-3.8-flash
     response = client.models.generate_content(
         model='gemini-3.8-flash',
         contents=prompt,
