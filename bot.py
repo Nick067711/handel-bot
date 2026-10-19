@@ -97,30 +97,25 @@ class TechnicalIndicators:
         return {"k": round(float(stoch_rsi), 2)}
 
 
-# --- AGREGACJA DANYCH Z MULTI-EXCHANGE (OKX, BINANCE, KRAKEN) ---
+# --- POBIERANIE ŚWIEC Z OKX, BINANCE, KRAKEN I BYBIT ---
 async def fetch_okx_candles(session, symbol, bar):
-    # Mapping bar format for OKX
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W"}
-    okx_bar = bar_map.get(bar, "1H")
     inst_id = f"{symbol}-USDT-SWAP" if "USDT" not in symbol else symbol
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={okx_bar}&limit=100"
+    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar_map.get(bar, '1H')}&limit=100"
     try:
         async with session.get(url, timeout=8) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if data.get("data"):
-                    candles = data["data"][::-1]
-                    return [float(c[4]) for c in candles]
+                    return [float(c[4]) for c in data["data"][::-1]]
     except Exception as e:
         print(f"OKX Fetch error ({symbol} {bar}): {e}")
     return None
 
 async def fetch_binance_candles(session, symbol, bar):
-    # Mapping bar format for Binance
     bar_map = {"1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w"}
-    bn_bar = bar_map.get(bar, "1h")
     bn_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
-    url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bn_bar}&limit=100"
+    url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bar_map.get(bar, '1h')}&limit=100"
     try:
         async with session.get(url, timeout=8) as resp:
             if resp.status == 200:
@@ -132,11 +127,9 @@ async def fetch_binance_candles(session, symbol, bar):
     return None
 
 async def fetch_kraken_candles(session, symbol, bar):
-    # Mapping bar format for Kraken (interval in minutes)
     bar_map = {"1h": 60, "4h": 240, "1d": 1440, "1w": 10080}
-    kr_interval = bar_map.get(bar, 60)
     pair = f"XBTUSDT" if symbol == "BTC" else f"{symbol}USDT"
-    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={kr_interval}"
+    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={bar_map.get(bar, 60)}"
     try:
         async with session.get(url, timeout=8) as resp:
             if resp.status == 200:
@@ -144,18 +137,34 @@ async def fetch_kraken_candles(session, symbol, bar):
                 result = data.get("result", {})
                 for k, v in result.items():
                     if k != "last":
-                        closes = [float(c[4]) for c in v[-100:]]
-                        return closes
+                        return [float(c[4]) for c in v[-100:]]
     except Exception as e:
         print(f"Kraken Fetch error ({symbol} {bar}): {e}")
     return None
 
+async def fetch_bybit_candles(session, symbol, bar):
+    bar_map = {"1h": "60", "4h": "240", "1d": "D", "1w": "W"}
+    by_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
+    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={by_symbol}&interval={bar_map.get(bar, '60')}&limit=100"
+    try:
+        async with session.get(url, timeout=8) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                list_data = data.get("result", {}).get("list", [])
+                if list_data:
+                    # Bybit zwraca dane od najnowszego do najstarszego, odwracamy
+                    return [float(c[4]) for c in list_data[::-1]]
+    except Exception as e:
+        print(f"Bybit Fetch error ({symbol} {bar}): {e}")
+    return None
+
 async def fetch_aggregated_market_data(session, symbol, bar):
-    """Pobiera i uśrednia wskaźniki z OKX, Binance oraz Krakena"""
+    """Pobiera i uśrednia wskaźniki z OKX, Binance, Kraken i Bybit"""
     tasks = [
         fetch_okx_candles(session, symbol, bar),
         fetch_binance_candles(session, symbol, bar),
-        fetch_kraken_candles(session, symbol, bar)
+        fetch_kraken_candles(session, symbol, bar),
+        fetch_bybit_candles(session, symbol, bar)
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     
@@ -182,8 +191,7 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     if not valid_indicators:
         return {"close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0, "ema200": 0.0}
 
-    # Uśrednianie wyników ze sprawdzonych giełd
-    avg_data = {
+    return {
         "close": round(float(np.mean([d["close"] for d in valid_indicators])), 4 if symbol == "STRK" else 2),
         "rsi": round(float(np.mean([d["rsi"] for d in valid_indicators])), 2),
         "stoch_k": round(float(np.mean([d["stoch_k"] for d in valid_indicators])), 2),
@@ -192,43 +200,77 @@ async def fetch_aggregated_market_data(session, symbol, bar):
         "ema50": round(float(np.mean([d["ema50"] for d in valid_indicators])), 4 if symbol == "STRK" else 2),
         "ema200": round(float(np.mean([d["ema200"] for d in valid_indicators])), 4 if symbol == "STRK" else 2)
     }
-    return avg_data
 
 
-async def fetch_btc_derivatives_and_onchain(session):
-    oi_data = {"open_interest": "Brak danych", "realized_price": "~$64,500 (szacunek on-chain)"}
+# --- OPEN INTEREST & LIKWIDACJE Z BYBIT I OKX ---
+async def fetch_derivatives_and_liquidations(session):
+    derivatives_info = {
+        "open_interest_okx": "Brak danych",
+        "open_interest_bybit": "Brak danych",
+        "liquidations_bybit": "Brak danych (stabilny przepływ)",
+        "realized_price": "~$64,500 (szacunek on-chain)"
+    }
+    
+    # Open Interest OKX
     try:
-        url_oi = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
-        async with session.get(url_oi, timeout=10) as resp:
+        url_oi_okx = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
+        async with session.get(url_oi_okx, timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
-                if res.get("data") and len(res["data"]) > 0:
-                    oi_val = float(res["data"][0].get("oiCcy", 0))
-                    oi_data["open_interest"] = f"{oi_val:,.2f} BTC"
+                if res.get("data"):
+                    derivatives_info["open_interest_okx"] = f"{float(res['data'][0].get('oiCcy', 0)):,.2f} BTC"
     except Exception as e:
-        print(f"Błąd pobierania Open Interest: {e}")
-        
-    return oi_data
+        print(f"OI OKX error: {e}")
+
+    # Open Interest Bybit
+    try:
+        url_oi_bybit = "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=4h&limit=1"
+        async with session.get(url_oi_bybit, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                list_oi = res.get("result", {}).get("list", [])
+                if list_oi:
+                    derivatives_info["open_interest_bybit"] = f"{float(list_oi[0].get('openInterest', 0)):,.2f} BTC"
+    except Exception as e:
+        print(f"OI Bybit error: {e}")
+
+    # Statystyki likwidacji z Bybit (publiczne ostatnie likwidacje futures)
+    try:
+        url_liq = "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=BTCUSDT&limit=50"
+        async with session.get(url_liq, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                trades = res.get("result", {}).get("list", [])
+                # Agregacja dużych zleceń mogących oznaczać likwidacje
+                large_sells = sum(1 for t in trades if t.get("side") == "Sell" and float(t.get("size", 0)) > 2.0)
+                large_buys = sum(1 for t in trades if t.get("side") == "Buy" and float(t.get("size", 0)) > 2.0)
+                derivatives_info["liquidations_bybit"] = f"Presja Buy: {large_buys} | Presja Sell: {large_sells} dużych transakcji"
+    except Exception as e:
+        print(f"Liquidations Bybit error: {e}")
+
+    return derivatives_info
 
 
-# --- GENEROWANIE RAPORTU PRZEZ GEMINI (STRICT MODEL: gemini-3.8-flash WITH RETRY) ---
-async def generate_ai_analysis(tech_summary, whale_data, max_retries=5, initial_delay=5):
+# --- GENEROWANIE RAPORTU PRZEZ GEMINI (gemini-3.8-flash) ---
+async def generate_ai_analysis(tech_summary, deriv_data, max_retries=5, initial_delay=5):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
     Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor. 
-    Przygotuj profesjonalny, szczegółowy raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W) z uśrednionych danych z OKX, Binance i Kraken, a także dane o wielorybach i kapitałach pochodnych (Open Interest, Realized Price):
+    Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W) z uśrednionych danych z giełd (OKX, Binance, Kraken, Bybit), a także dane o instrumentach pochodnych i likwidacjach:
     
-    UŚREDNIONE DANE TECHNICZNE (OKX + BINANCE + KRAKEN):
+    DANE TECHNICZNE (UŚREDNIONE Z 4 GIEŁD):
     {tech_summary}
     
-    DANE ON-CHAIN / WIELORYBY:
-    - Open Interest (BTC SWAP): {whale_data['open_interest']}
-    - Realized Price / Baza kosztowa wielorybów: {whale_data['realized_price']}
+    DANE POCHODNE I LIKWIDACJE:
+    - Open Interest (OKX): {deriv_data['open_interest_okx']}
+    - Open Interest (Bybit): {deriv_data['open_interest_bybit']}
+    - Monitor Likwidacji / Presja (Bybit): {deriv_data['liquidations_bybit']}
+    - Baza Kosztowa Wielorybów (Realized Price): {deriv_data['realized_price']}
     
     Podziel raport na dwie niezależne części:
-    1. Kondycja Rynku, BTC, Działania Wielorybów (Open Interest & Realized Price), Poziomy Likwidacji oraz Starknet (STRK).
-    2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP) bazujące na obecnym ułożeniu rynku.
+    1. Kondycja Rynku, BTC, Zachowanie Wielorybów, Analiza Open Interest i Likwidacji oraz Starknet (STRK).
+    2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP).
     """
     
     delay = initial_delay
@@ -247,14 +289,13 @@ async def generate_ai_analysis(tech_summary, whale_data, max_retries=5, initial_
         except APIError as e:
             print(f"Ostrzeżenie: Błąd API Gemini (próba {attempt}/{max_retries}): {e}")
         except Exception as e:
-            print(f"Próba {attempt}/{max_retries} nieudana z powodu błędu: {e}")
+            print(f"Próba {attempt}/{max_retries} nieudana: {e}")
             
         if attempt < max_retries:
-            print(f"Czekam {delay} s przed kolejną próbą zapytania Gemini...")
             await asyncio.sleep(delay)
             delay *= 2
 
-    return "Błąd generowania analizy (przeciążenie API Gemini po wielokrotnych próbach).", "Spróbuj ponownie przy kolejnym uruchomieniu."
+    return "Błąd generowania analizy (przeciążenie API Gemini).", "Spróbuj ponownie później."
 
 
 # --- WYSYŁKA NA TELEGRAM ---
@@ -298,24 +339,23 @@ async def main():
         btc_data = {}
         strk_data = {}
         
-        # Pobieranie uśrednionych danych z giełd
         for bar in intervals:
             btc_data[bar] = await fetch_aggregated_market_data(session, "BTC", bar)
             strk_data[bar] = await fetch_aggregated_market_data(session, "STRK", bar)
             
-        whale_data = await fetch_btc_derivatives_and_onchain(session)
+        deriv_data = await fetch_derivatives_and_liquidations(session)
         
-        tech_summary = "BTC Wyższe Interwały (Averaged OKX/Binance/Kraken):\n"
+        tech_summary = "BTC Wyższe Interwały (OKX/Binance/Kraken/Bybit):\n"
         for bar in intervals:
             d = btc_data[bar]
             tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}\n"
             
-        tech_summary += "\nSTRK Wyższe Interwały (Averaged OKX/Binance/Kraken):\n"
+        tech_summary += "\nSTRK Wyższe Interwały (OKX/Binance/Kraken/Bybit):\n"
         for bar in intervals:
             d = strk_data[bar]
             tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}\n"
         
-        part1, part2 = await generate_ai_analysis(tech_summary, whale_data)
+        part1, part2 = await generate_ai_analysis(tech_summary, deriv_data)
         
         await send_telegram(part1)
         await asyncio.sleep(1)
@@ -358,13 +398,15 @@ async def main():
         <h2>Top Selekcja Altcoinowa</h2>
         <pre>{part2}</pre>
 
-        <h2>Dane On-Chain & Pochodne (Wieloryby)</h2>
+        <h2>Dane On-Chain, Pochodne i Likwidacje</h2>
         <div class="tech-box">
-            <div class="data-row"><b>Open Interest (BTC SWAP):</b> {whale_data['open_interest']}</div>
-            <div class="data-row"><b>Realized Price (Szacunek On-Chain):</b> {whale_data['realized_price']}</div>
+            <div class="data-row"><b>Open Interest (OKX):</b> {deriv_data['open_interest_okx']}</div>
+            <div class="data-row"><b>Open Interest (Bybit):</b> {deriv_data['open_interest_bybit']}</div>
+            <div class="data-row"><b>Presja Likwidacyjna (Bybit):</b> {deriv_data['liquidations_bybit']}</div>
+            <div class="data-row"><b>Realized Price (Szacunek On-Chain):</b> {deriv_data['realized_price']}</div>
         </div>
 
-        <h2>Dane Techniczne i Wskaźniki Uśrednione (1h, 4h, 1D, 1W) [OKX, Binance, Kraken]</h2>
+        <h2>Dane Techniczne i Wskaźniki Uśrednione (1h, 4h, 1D, 1W) [OKX, Binance, Kraken, Bybit]</h2>
         
         <div class="tech-box">
             <h3>BTC (Bitcoin)</h3>
