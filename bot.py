@@ -19,7 +19,7 @@ FTP_PASS = os.getenv("FTP_PASS")
 # 2. FUNKCJA WYSYŁKI NA FTP
 # ==========================================
 def upload_to_ftp(content_text, remote_filename="latest_report.txt"):
-    """Wysyła treść raportu jako plik .txt na zewnętrzny serwer FTP."""
+    """Wysyła treść raportu jako plik .txt do folderu public_html na serwerze FTP."""
     if not FTP_HOST or not FTP_USER or not FTP_PASS:
         print("[FTP] Brak danych logowania FTP w zmiennych środowiskowych. Pomijam wysyłkę na FTP.")
         return
@@ -31,9 +31,23 @@ def upload_to_ftp(content_text, remote_filename="latest_report.txt"):
 
         print(f"[FTP] Łączenie z serwerem FTP: {FTP_HOST}...")
         with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
+            
+            # Przechodzimy do odpowiedniego katalogu publicznego strony
+            target_dir = "domains/piwecki.pl/public_html" # Jeśli Twój folder to public_html (z 'html' na końcu), zmień tutaj
+            # (Uwaga: jeśli na serwerze katalog nazywa się dokładnie 'public.html', zostaw tak jak poniżej)
+            
+            print(f"[FTP] Przechodzę do katalogu: {target_dir}")
+            try:
+                ftp.cwd(target_dir)
+            except Exception as e:
+                print(f"[FTP BŁĄD] Nie znaleziono katalogu {target_dir}: {e}")
+                return
+
+            # Wysyłka pliku
             with open(local_temp_file, "rb") as file_to_send:
                 ftp.storbinary(f"STOR {remote_filename}", file_to_send)
-        print(f"[FTP] Sukces! Plik {remote_filename} został pomyślnie wysłany na serwer FTP.")
+                
+        print(f"[FTP] Sukces! Plik {remote_filename} został pomyślnie wysłany do {target_dir}.")
     except Exception as e:
         print(f"[FTP BŁĄD] Nie udało się wysłać pliku na FTP: {e}")
     finally:
