@@ -97,45 +97,105 @@ class TechnicalIndicators:
         return {"k": round(float(stoch_rsi), 2)}
 
 
-# --- POBIERANIE DANYCH OKX I ON-CHAIN (OPEN INTEREST / REALIZED PRICE) ---
-async def fetch_market_data(session, inst_id, bar):
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit=100"
-    for attempt in range(3):
-        try:
-            async with session.get(url, timeout=10) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    if data.get("data") and len(data["data"]) > 0:
-                        candles = data["data"][::-1]
-                        closes = [float(c[4]) for c in candles]
-                        
-                        rsi = TechnicalIndicators.calculate_rsi(closes)
-                        ema20 = TechnicalIndicators.calculate_ema(closes, 20)
-                        ema50 = TechnicalIndicators.calculate_ema(closes, 50)
-                        ema200 = TechnicalIndicators.calculate_ema(closes, 200) if len(closes) >= 200 else ema50
-                        macd = TechnicalIndicators.calculate_macd(closes)
-                        stoch = TechnicalIndicators.calculate_stoch_rsi(closes)
-                        
-                        return {
-                            "close": closes[-1],
-                            "rsi": rsi,
-                            "stoch_k": stoch["k"],
-                            "macd_hist": macd["hist"],
-                            "ema20": ema20,
-                            "ema50": ema50,
-                            "ema200": ema200
-                        }
-        except Exception as e:
-            print(f"Próba {attempt+1} - Błąd pobierania {inst_id} ({bar}): {e}")
-        await asyncio.sleep(2)
-        
-    return {
-        "close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0, "ema200": 0.0
+# --- AGREGACJA DANYCH Z MULTI-EXCHANGE (OKX, BINANCE, KRAKEN) ---
+async def fetch_okx_candles(session, symbol, bar):
+    # Mapping bar format for OKX
+    bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W"}
+    okx_bar = bar_map.get(bar, "1H")
+    inst_id = f"{symbol}-USDT-SWAP" if "USDT" not in symbol else symbol
+    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={okx_bar}&limit=100"
+    try:
+        async with session.get(url, timeout=8) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("data"):
+                    candles = data["data"][::-1]
+                    return [float(c[4]) for c in candles]
+    except Exception as e:
+        print(f"OKX Fetch error ({symbol} {bar}): {e}")
+    return None
+
+async def fetch_binance_candles(session, symbol, bar):
+    # Mapping bar format for Binance
+    bar_map = {"1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w"}
+    bn_bar = bar_map.get(bar, "1h")
+    bn_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
+    url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bn_bar}&limit=100"
+    try:
+        async with session.get(url, timeout=8) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    return [float(c[4]) for c in data]
+    except Exception as e:
+        print(f"Binance Fetch error ({symbol} {bar}): {e}")
+    return None
+
+async def fetch_kraken_candles(session, symbol, bar):
+    # Mapping bar format for Kraken (interval in minutes)
+    bar_map = {"1h": 60, "4h": 240, "1d": 1440, "1w": 10080}
+    kr_interval = bar_map.get(bar, 60)
+    pair = f"XBTUSDT" if symbol == "BTC" else f"{symbol}USDT"
+    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={kr_interval}"
+    try:
+        async with session.get(url, timeout=8) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                result = data.get("result", {})
+                for k, v in result.items():
+                    if k != "last":
+                        closes = [float(c[4]) for c in v[-100:]]
+                        return closes
+    except Exception as e:
+        print(f"Kraken Fetch error ({symbol} {bar}): {e}")
+    return None
+
+async def fetch_aggregated_market_data(session, symbol, bar):
+    """Pobiera i uśrednia wskaźniki z OKX, Binance oraz Krakena"""
+    tasks = [
+        fetch_okx_candles(session, symbol, bar),
+        fetch_binance_candles(session, symbol, bar),
+        fetch_kraken_candles(session, symbol, bar)
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    valid_indicators = []
+    for closes in results:
+        if isinstance(closes, list) and len(closes) >= 20:
+            rsi = TechnicalIndicators.calculate_rsi(closes)
+            ema20 = TechnicalIndicators.calculate_ema(closes, 20)
+            ema50 = TechnicalIndicators.calculate_ema(closes, 50)
+            ema200 = TechnicalIndicators.calculate_ema(closes, 200) if len(closes) >= 200 else ema50
+            macd = TechnicalIndicators.calculate_macd(closes)
+            stoch = TechnicalIndicators.calculate_stoch_rsi(closes)
+            
+            valid_indicators.append({
+                "close": closes[-1],
+                "rsi": rsi,
+                "stoch_k": stoch["k"],
+                "macd_hist": macd["hist"],
+                "ema20": ema20,
+                "ema50": ema50,
+                "ema200": ema200
+            })
+
+    if not valid_indicators:
+        return {"close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0, "ema200": 0.0}
+
+    # Uśrednianie wyników ze sprawdzonych giełd
+    avg_data = {
+        "close": round(float(np.mean([d["close"] for d in valid_indicators])), 4 if symbol == "STRK" else 2),
+        "rsi": round(float(np.mean([d["rsi"] for d in valid_indicators])), 2),
+        "stoch_k": round(float(np.mean([d["stoch_k"] for d in valid_indicators])), 2),
+        "macd_hist": round(float(np.mean([d["macd_hist"] for d in valid_indicators])), 4),
+        "ema20": round(float(np.mean([d["ema20"] for d in valid_indicators])), 4 if symbol == "STRK" else 2),
+        "ema50": round(float(np.mean([d["ema50"] for d in valid_indicators])), 4 if symbol == "STRK" else 2),
+        "ema200": round(float(np.mean([d["ema200"] for d in valid_indicators])), 4 if symbol == "STRK" else 2)
     }
+    return avg_data
 
 
 async def fetch_btc_derivatives_and_onchain(session):
-    # Pobieranie Open Interest z OKX dla BTC-USDT-SWAP
     oi_data = {"open_interest": "Brak danych", "realized_price": "~$64,500 (szacunek on-chain)"}
     try:
         url_oi = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
@@ -143,31 +203,32 @@ async def fetch_btc_derivatives_and_onchain(session):
             if resp.status == 200:
                 res = await resp.json()
                 if res.get("data") and len(res["data"]) > 0:
-                    oi_data["open_interest"] = res["data"][0].get("oiCcy", "Wysoki / Płynny")
+                    oi_val = float(res["data"][0].get("oiCcy", 0))
+                    oi_data["open_interest"] = f"{oi_val:,.2f} BTC"
     except Exception as e:
         print(f"Błąd pobierania Open Interest: {e}")
         
     return oi_data
 
 
-# --- GENEROWANIE RAPORTU PRZEZ GEMINI (STRICT MODEL: gemini-3.8-flash WITH RETRY LOGIC) ---
+# --- GENEROWANIE RAPORTU PRZEZ GEMINI (STRICT MODEL: gemini-3.8-flash WITH RETRY) ---
 async def generate_ai_analysis(tech_summary, whale_data, max_retries=5, initial_delay=5):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
     Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor. 
-    Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W) oraz dane o wielorybach i kapitałach pochodnych (Open Interest, Realized Price):
+    Przygotuj profesjonalny, szczegółowy raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W) z uśrednionych danych z OKX, Binance i Kraken, a także dane o wielorybach i kapitałach pochodnych (Open Interest, Realized Price):
     
-    DANE TECHNICZNE:
+    UŚREDNIONE DANE TECHNICZNE (OKX + BINANCE + KRAKEN):
     {tech_summary}
     
     DANE ON-CHAIN / WIELORYBY:
-    - Open Interest (BTC SWAP OKX): {whale_data['open_interest']}
+    - Open Interest (BTC SWAP): {whale_data['open_interest']}
     - Realized Price / Baza kosztowa wielorybów: {whale_data['realized_price']}
     
     Podziel raport na dwie niezależne części:
-    1. Kondycja Rynku, BTC, Działania Wielorybów (Open Interest & Realized Price) oraz Starknet (STRK).
-    2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP).
+    1. Kondycja Rynku, BTC, Działania Wielorybów (Open Interest & Realized Price), Poziomy Likwidacji oraz Starknet (STRK).
+    2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP) bazujące na obecnym ułożeniu rynku.
     """
     
     delay = initial_delay
@@ -186,12 +247,12 @@ async def generate_ai_analysis(tech_summary, whale_data, max_retries=5, initial_
         except APIError as e:
             print(f"Ostrzeżenie: Błąd API Gemini (próba {attempt}/{max_retries}): {e}")
         except Exception as e:
-            print(f"Próba {attempt}/{max_retries} nieudana z powodu nieoczekiwanego błędu: {e}")
+            print(f"Próba {attempt}/{max_retries} nieudana z powodu błędu: {e}")
             
         if attempt < max_retries:
             print(f"Czekam {delay} s przed kolejną próbą zapytania Gemini...")
             await asyncio.sleep(delay)
-            delay *= 2  # Narastające opóźnienie (5s, 10s, 20s, 40s)
+            delay *= 2
 
     return "Błąd generowania analizy (przeciążenie API Gemini po wielokrotnych próbach).", "Spróbuj ponownie przy kolejnym uruchomieniu."
 
@@ -237,21 +298,22 @@ async def main():
         btc_data = {}
         strk_data = {}
         
+        # Pobieranie uśrednionych danych z giełd
         for bar in intervals:
-            btc_data[bar] = await fetch_market_data(session, "BTC-USDT-SWAP", bar)
-            strk_data[bar] = await fetch_market_data(session, "STRK-USDT-SWAP", bar)
+            btc_data[bar] = await fetch_aggregated_market_data(session, "BTC", bar)
+            strk_data[bar] = await fetch_aggregated_market_data(session, "STRK", bar)
             
         whale_data = await fetch_btc_derivatives_and_onchain(session)
         
-        tech_summary = "BTC Wyższe Interwały:\n"
+        tech_summary = "BTC Wyższe Interwały (Averaged OKX/Binance/Kraken):\n"
         for bar in intervals:
             d = btc_data[bar]
-            tech_summary += f"- {bar}: Cena: {d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: {d['ema20']}, EMA50: {d['ema50']}\n"
+            tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}\n"
             
-        tech_summary += "\nSTRK Wyższe Interwały:\n"
+        tech_summary += "\nSTRK Wyższe Interwały (Averaged OKX/Binance/Kraken):\n"
         for bar in intervals:
             d = strk_data[bar]
-            tech_summary += f"- {bar}: Cena: {d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: {d['ema20']}, EMA50: {d['ema50']}\n"
+            tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}\n"
         
         part1, part2 = await generate_ai_analysis(tech_summary, whale_data)
         
@@ -262,12 +324,12 @@ async def main():
         btc_rows = ""
         for bar in intervals:
             d = btc_data[bar]
-            btc_rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: {d["ema20"]} | EMA50: {d["ema50"]}</div>\n'
+            btc_rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: ${d["ema20"]} | EMA50: ${d["ema50"]}</div>\n'
 
         strk_rows = ""
         for bar in intervals:
             d = strk_data[bar]
-            strk_rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: {d["ema20"]} | EMA50: {d["ema50"]}</div>\n'
+            strk_rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: ${d["ema20"]} | EMA50: ${d["ema50"]}</div>\n'
 
         html_content = f"""<!DOCTYPE html>
 <html lang="pl">
@@ -302,7 +364,7 @@ async def main():
             <div class="data-row"><b>Realized Price (Szacunek On-Chain):</b> {whale_data['realized_price']}</div>
         </div>
 
-        <h2>Dane Techniczne i Wskaźniki (1h, 4h, 1D, 1W)</h2>
+        <h2>Dane Techniczne i Wskaźniki Uśrednione (1h, 4h, 1D, 1W) [OKX, Binance, Kraken]</h2>
         
         <div class="tech-box">
             <h3>BTC (Bitcoin)</h3>
