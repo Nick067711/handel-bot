@@ -1,4 +1,5 @@
 import os
+import time
 import ftplib
 import requests
 from google import genai
@@ -50,7 +51,7 @@ def fetch_okx_deriv_data(inst_id, ccy):
     except Exception as e:
         print(f"[OKX OI Error] {swap_inst_id}: {e}")
 
-    # 3. Long / Short Ratio (Top Traders / Account Ratio)
+    # 3. Long / Short Ratio
     try:
         url_ls = f"https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy={ccy}"
         res_ls = requests.get(url_ls, timeout=8).json()
@@ -90,10 +91,10 @@ def fetch_all_market_data():
     return data
 
 # ==========================================
-# 3. GENEROWANIE RAPORTU I ANALIZY PRZEZ AI
+# 3. GENEROWANIE RAPORTU Z OBSŁUGĄ BŁĘDÓW 503 I FALLBACKAMI
 # ==========================================
 def generate_report(m_data):
-    """Generuje raport przy użyciu modelu gemini-3.8-flash."""
+    """Generuje raport z użyciem Gemini API, z zabezpieczeniem przed przeciążeniem serwerów (503)."""
     if not GEMINI_API_KEY:
         print("[BŁĄD] Brak GEMINI_API_KEY!")
         return "Błąd: Brak klucza API dla Gemini."
@@ -124,19 +125,32 @@ SONIC (S):
 - Wolumen 24h: ${m_data['s']['vol24h']}
 
 === ZASADY I INSTRUKCJE FORMATOWANIA ===
-1. BEZWZGLĘDNY ZAKAZ używania składni LaTeX (np. zakaz backslashy `\\,`). Ceny i liczby pisz wyłącznie jako `$82,750` lub `$0.0583`.
+1. BEZWZGLĘDNY ZAKAZ używania składni LaTeX (np. zakaz backslashy). Ceny i liczby pisz wyłącznie jako $82,750 lub $0.0583.
 2. Raport musi zawierać:
    - SEKCJĘ 1: Kondycja Rynku & Smart Money (BTC & On-Chain)
    - SEKCJĘ 2: Szczegółowa Analiza Starknet (STRK) w oparciu o Open Interest i Long/Short Ratio (ocena ryzyka likwidacji, wyczerpania spadków i presji rynkowej).
    - SEKCJĘ 3: Sonic (S) oraz Top Selekcję Altcoinową z twardymi strefami (Entry, SL, TP i Safe Position Size).
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt
-    )
+    # Lista modeli do wypróbowania w razie błędu 503 (przeciążenia)
+    models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
 
-    return response.text
+    for model_name in models_to_try:
+        for attempt in range(2):  # Dwa podejścia na dany model
+            try:
+                print(f"[AI] Próbuję wygenerować raport (model: {model_name}, próba {attempt+1})...")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                if response and response.text:
+                    print(f"[AI] Sukces z modelem {model_name}!")
+                    return response.text
+            except Exception as e:
+                print(f"[AI Ostrzeżenie] Model {model_name} nie odpowiedział (Błąd: {e}). Czekam 5 sekund...")
+                time.sleep(5)
+
+    return "Błąd krytyczny: Wszystkie modele Gemini są obecnie przeciążone (503 Unavailable). Spróbuj uruchomić akcję ponownie za kilka minut."
 
 # ==========================================
 # 4. WYSYŁKA RAPORTU NA SERWER FTP (UTF-8)
@@ -149,7 +163,6 @@ def upload_to_ftp(content_text, remote_filename="latest_report.txt"):
 
     local_temp_file = "temp_report.txt"
     try:
-        # Zapis lokalny z wymuszonym UTF-8
         with open(local_temp_file, "w", encoding="utf-8") as f:
             f.write(content_text)
 
@@ -167,7 +180,7 @@ def upload_to_ftp(content_text, remote_filename="latest_report.txt"):
             with open(local_temp_file, "rb") as file_to_send:
                 ftp.storbinary(f"STOR {remote_filename}", file_to_send)
 
-        print(f"[FTP] Sukces! Plik {remote_filename} zapisany pomyślnie w UTF-8 pod adresem https://piwecki.pl/{remote_filename}")
+        print(f"[FTP] Sukces! Plik {remote_filename} zapisany pod adresem https://piwecki.pl/{remote_filename}")
     except Exception as e:
         print(f"[FTP BŁĄD] Wyjątek podczas wysyłania FTP: {e}")
     finally:
@@ -211,9 +224,8 @@ if __name__ == "__main__":
     # 1. Pobranie danych z OKX i Blockchain
     m_data = fetch_all_market_data()
 
-    # 2. Generowanie raportu przez Gemini API (gemini-3.8-flash)
+    # 2. Generowanie raportu przez Gemini API (z zabezpieczeniem 503)
     report = generate_report(m_data)
-    print("[Raport] Wygenerowano raport analityczny.")
 
     # 3. Zapis lokalnej kopii w repozytorium (UTF-8)
     with open("latest_report.md", "w", encoding="utf-8") as f:
