@@ -1,240 +1,259 @@
 import os
-import time
 import ftplib
-import requests
+import asyncio
+import aiohttp
+import numpy as np
 from google import genai
 
-# ==========================================
-# KONFIGURACJA ZMIENNYCH ŚRODOWISKOWYCH
-# ==========================================
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
-FTP_HOST = os.getenv("FTP_HOST")
-FTP_USER = os.getenv("FTP_USER")
-FTP_PASS = os.getenv("FTP_PASS")
+# --- KONFIGURACJA ŚRODOWISKOWA / API ---
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "TUTAJ_TOKEN_TELEGRAM")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "TUTAJ_CHAT_ID")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "TUTAJ_GEMINI_KEY")
 
-# ==========================================
-# 1. FUNKCJA POBIERANIA POMOCNICZYCH METRYK OKX
-# ==========================================
-def fetch_okx_deriv_data(inst_id, ccy):
-    """
-    Pobiera dane instrumentu z OKX API:
-    - Ticker (Cena i wolumen 24h)
-    - Open Interest (Otwarte pozycje na kontraktach SWAP)
-    - Long/Short Ratio (Sentyment inwestorów)
-    """
-    metrics = {
-        "price": "N/A",
-        "vol24h": "N/A",
-        "open_interest": "N/A",
-        "long_short_ratio": "N/A"
-    }
-    
-    # 1. Ticker Spot/Swap
-    try:
-        url_ticker = f"https://www.okx.com/api/v5/market/ticker?instId={inst_id}"
-        res = requests.get(url_ticker, timeout=8).json()
-        if res.get("code") == "0" and res.get("data"):
-            metrics["price"] = res["data"][0].get("last", "N/A")
-            metrics["vol24h"] = res["data"][0].get("volCcy24h", "N/A")
-    except Exception as e:
-        print(f"[OKX Ticker Error] {inst_id}: {e}")
+FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
+FTP_USER = os.getenv("FTP_USER", "TWOJ_FTP_USER")
+FTP_PASS = os.getenv("FTP_PASS", "TWOJ_FTP_PASS")
 
-    # 2. Open Interest (Swap)
-    try:
-        swap_inst_id = f"{ccy}-USDT-SWAP"
-        url_oi = f"https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId={swap_inst_id}"
-        res_oi = requests.get(url_oi, timeout=8).json()
-        if res_oi.get("code") == "0" and res_oi.get("data"):
-            metrics["open_interest"] = res_oi["data"][0].get("oi", "N/A")
-    except Exception as e:
-        print(f"[OKX OI Error] {swap_inst_id}: {e}")
 
-    # 3. Long / Short Ratio
-    try:
-        url_ls = f"https://www.okx.com/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy={ccy}"
-        res_ls = requests.get(url_ls, timeout=8).json()
-        if res_ls.get("code") == "0" and res_ls.get("data") and len(res_ls["data"]) > 0:
-            metrics["long_short_ratio"] = res_ls["data"][0][1] if len(res_ls["data"][0]) > 1 else "N/A"
-    except Exception as e:
-        print(f"[OKX L/S Ratio Error] {ccy}: {e}")
-
-    return metrics
-
-# ==========================================
-# 2. POBIERANIE WSZYSTKICH DANYCH RYNKOWYCH
-# ==========================================
-def fetch_all_market_data():
-    """Gromadzi kompleksowe dane z OKX oraz Blockchain.info."""
-    data = {}
-
-    print("[Dane] Pobieram dane dla Bitcoina (BTC)...")
-    data["btc"] = fetch_okx_deriv_data("BTC-USDT", "BTC")
-
-    print("[Dane] Pobieram dane dla Starknet (STRK)...")
-    data["strk"] = fetch_okx_deriv_data("STRK-USDT", "STRK")
-
-    print("[Dane] Pobieram dane dla Sonic (S)...")
-    data["s"] = fetch_okx_deriv_data("S-USDT", "S")
-
-    # On-chain Bitcoin
-    try:
-        res_chain = requests.get("https://api.blockchain.info/stats", timeout=8).json()
-        data["btc_hashrate"] = res_chain.get("hash_rate", "N/A")
-        data["btc_n_tx"] = res_chain.get("n_tx", "N/A")
-    except Exception as e:
-        print(f"[Blockchain.info Error]: {e}")
-        data["btc_hashrate"] = "N/A"
-        data["btc_n_tx"] = "N/A"
-
-    return data
-
-# ==========================================
-# 3. GENEROWANIE RAPORTU Z OBSŁUGĄ BŁĘDÓW 503 I FALLBACKAMI
-# ==========================================
-def generate_report(m_data):
-    """Generuje raport z użyciem Gemini API, z zabezpieczeniem przed przeciążeniem serwerów (503)."""
-    if not GEMINI_API_KEY:
-        print("[BŁĄD] Brak GEMINI_API_KEY!")
-        return "Błąd: Brak klucza API dla Gemini."
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-
-    prompt = f"""
-Jesteś głównym analitykiem i ekspertem od zarządzania ryzykiem dla projektu Market Maker Monitor.
-Przeanalizuj poniższy zestaw surowych danych rynkowych pochodzących bezpośrednio z OKX API oraz Blockchain.info.
-
-=== PEŁNE DANE RYNKOWE ===
-BITCOIN (BTC):
-- Cena Spot: ${m_data['btc']['price']}
-- Wolumen 24h: ${m_data['btc']['vol24h']}
-- Open Interest (Kontrakty Swap): {m_data['btc']['open_interest']} BTC
-- Long/Short Account Ratio: {m_data['btc']['long_short_ratio']}
-- Hashrate sieci: {m_data['btc_hashrate']} GH/s
-- Liczba transakcji 24h: {m_data['btc_n_tx']}
-
-STARKNET (STRK) - PRIORYTETOWY AKTUALNY TRADE:
-- Cena Spot: ${m_data['strk']['price']}
-- Wolumen 24h: ${m_data['strk']['vol24h']}
-- Open Interest (Kontrakty Swap): {m_data['strk']['open_interest']} STRK
-- Long/Short Account Ratio: {m_data['strk']['long_short_ratio']}
-
-SONIC (S):
-- Cena Spot: ${m_data['s']['price']}
-- Wolumen 24h: ${m_data['s']['vol24h']}
-
-=== ZASADY I INSTRUKCJE FORMATOWANIA ===
-1. BEZWZGLĘDNY ZAKAZ używania składni LaTeX (np. zakaz backslashy). Ceny i liczby pisz wyłącznie jako $82,750 lub $0.0583.
-2. Raport musi zawierać:
-   - SEKCJĘ 1: Kondycja Rynku & Smart Money (BTC & On-Chain)
-   - SEKCJĘ 2: Szczegółowa Analiza Starknet (STRK) w oparciu o Open Interest i Long/Short Ratio (ocena ryzyka likwidacji, wyczerpania spadków i presji rynkowej).
-   - SEKCJĘ 3: Sonic (S) oraz Top Selekcję Altcoinową z twardymi strefami (Entry, SL, TP i Safe Position Size).
-"""
-
-    # Lista modeli do wypróbowania w razie błędu 503 (przeciążenia)
-    models_to_try = ["gemini-3.8-flash", "gemini-2.5-flash", "gemini-1.5-flash"]
-
-    for model_name in models_to_try:
-        for attempt in range(2):  # Dwa podejścia na dany model
-            try:
-                print(f"[AI] Próbuję wygenerować raport (model: {model_name}, próba {attempt+1})...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
-                if response and response.text:
-                    print(f"[AI] Sukces z modelem {model_name}!")
-                    return response.text
-            except Exception as e:
-                print(f"[AI Ostrzeżenie] Model {model_name} nie odpowiedział (Błąd: {e}). Czekam 5 sekund...")
-                time.sleep(5)
-
-    return "Błąd krytyczny: Wszystkie modele Gemini są obecnie przeciążone (503 Unavailable). Spróbuj uruchomić akcję ponownie za kilka minut."
-
-# ==========================================
-# 4. WYSYŁKA RAPORTU NA SERWER FTP (UTF-8)
-# ==========================================
-def upload_to_ftp(content_text, remote_filename="latest_report.txt"):
-    """Zapisuje plik lokalnie w UTF-8 i wysyła na serwer FTP do public_html."""
-    if not FTP_HOST or not FTP_USER or not FTP_PASS:
-        print("[FTP] Brak danych logowania FTP. Pomijam wysyłkę.")
-        return
-
-    local_temp_file = "temp_report.txt"
-    try:
-        with open(local_temp_file, "w", encoding="utf-8") as f:
-            f.write(content_text)
-
-        print(f"[FTP] Łączenie z serwerem FTP: {FTP_HOST}...")
-        with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
-            target_dir = "domains/piwecki.pl/public_html"
-            print(f"[FTP] Przechodzę do katalogu: {target_dir}")
+# --- KALKULATOR WSKAŹNIKÓW TECHNICZNYCH ---
+class TechnicalIndicators:
+    @staticmethod
+    def calculate_rsi(prices, period=14):
+        if len(prices) < period + 1:
+            return 50.0
+        deltas = np.diff(prices)
+        gains = np.where(deltas > 0, deltas, 0)
+        losses = np.where(deltas < 0, -deltas, 0)
+        
+        avg_gain = np.mean(gains[:period])
+        avg_loss = np.mean(losses[:period])
+        
+        for i in range(period, len(prices) - 1):
+            avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+            avg_loss = (avg_loss * (period - 1) + losses[i]) / period
             
-            try:
-                ftp.cwd(target_dir)
-            except Exception as e:
-                print(f"[FTP BŁĄD] Przejście do katalogu {target_dir} nieudane: {e}")
-                return
+        if avg_loss == 0:
+            return 100.0
+        rs = avg_gain / avg_loss
+        return round(float(100 - (100 / (1 + rs))), 2)
 
-            with open(local_temp_file, "rb") as file_to_send:
-                ftp.storbinary(f"STOR {remote_filename}", file_to_send)
+    @staticmethod
+    def calculate_ema(prices, period):
+        if len(prices) < period:
+            return float(prices[-1])
+        prices = np.array(prices)
+        weights = np.exp(np.linspace(-1., 0., period))
+        weights /= weights.sum()
+        ema = np.convolve(prices, weights, mode='full')[:len(prices)]
+        ema[:period] = ema[period]
+        return round(float(ema[-1]), 5)
 
-        print(f"[FTP] Sukces! Plik {remote_filename} zapisany pod adresem https://piwecki.pl/{remote_filename}")
-    except Exception as e:
-        print(f"[FTP BŁĄD] Wyjątek podczas wysyłania FTP: {e}")
-    finally:
-        if os.path.exists(local_temp_file):
-            os.remove(local_temp_file)
+    @staticmethod
+    def calculate_macd(prices, fast=12, slow=26, signal=9):
+        if len(prices) < slow + signal:
+            return {"macd": 0.0, "signal": 0.0, "hist": 0.0}
+        prices = np.array(prices)
+        
+        def ema_arr(data, p):
+            alpha = 2 / (p + 1)
+            res = [data[0]]
+            for val in data[1:]:
+                res.append(val * alpha + res[-1] * (1 - alpha))
+            return np.array(res)
 
-# ==========================================
-# 5. WYSYŁKA NA TELEGRAM
-# ==========================================
-def send_telegram_messages(report_text):
-    """Wysyła raport na Telegram bez parse_mode."""
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[TELEGRAM] Brak danych Telegram API. Pomijam.")
-        return
-
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-
-    max_length = 4000
-    chunks = [report_text[i:i+max_length] for i in range(0, len(report_text), max_length)]
-
-    for chunk in chunks:
-        payload = {
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": chunk
+        ema_fast = ema_arr(prices, fast)
+        ema_slow = ema_arr(prices, slow)
+        macd_line = ema_fast - ema_slow
+        signal_line = ema_arr(macd_line, signal)
+        histogram = macd_line - signal_line
+        
+        return {
+            "macd": round(float(macd_line[-1]), 5),
+            "signal": round(float(signal_line[-1]), 5),
+            "hist": round(float(histogram[-1]), 5)
         }
-        try:
-            res = requests.post(url, json=payload, timeout=10)
-            if res.status_code == 200:
-                print("[TELEGRAM] Wiadomość wysłana pomyślnie.")
-            else:
-                print(f"[TELEGRAM BŁĄD] {res.text}")
-        except Exception as e:
-            print(f"[TELEGRAM BŁĄD] Wyjątek: {e}")
 
-# ==========================================
-# GŁÓWNY PROGRAM
-# ==========================================
-if __name__ == "__main__":
-    print("=== Start Market Maker Monitor Bot ===")
+    @staticmethod
+    def calculate_stoch_rsi(prices, rsi_period=14, stoch_period=14):
+        rsi_series = []
+        for i in range(rsi_period, len(prices) + 1):
+            sub_prices = prices[:i]
+            rsi_val = TechnicalIndicators.calculate_rsi(sub_prices, rsi_period)
+            rsi_series.append(rsi_val)
+            
+        if len(rsi_series) < stoch_period:
+            return {"k": 50.0}
+            
+        rsi_slice = rsi_series[-stoch_period:]
+        min_rsi = min(rsi_slice)
+        max_rsi = max(rsi_slice)
+        
+        if max_rsi == min_rsi:
+            stoch_rsi = 100.0
+        else:
+            stoch_rsi = ((rsi_series[-1] - min_rsi) / (max_rsi - min_rsi)) * 100
+            
+        return {"k": round(float(stoch_rsi), 2)}
+
+
+async def fetch_market_data(session, inst_id, bar):
+    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar}&limit=100"
+    try:
+        async with session.get(url, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("data"):
+                    candles = data["data"][::-1] # Od najstarszej do najnowszej
+                    closes = [float(c[4]) for c in candles]
+                    
+                    rsi = TechnicalIndicators.calculate_rsi(closes)
+                    ema20 = TechnicalIndicators.calculate_ema(closes, 20)
+                    ema50 = TechnicalIndicators.calculate_ema(closes, 50)
+                    ema200 = TechnicalIndicators.calculate_ema(closes, 200) if len(closes) >= 200 else ema50
+                    macd = TechnicalIndicators.calculate_macd(closes)
+                    stoch = TechnicalIndicators.calculate_stoch_rsi(closes)
+                    
+                    return {
+                        "close": closes[-1],
+                        "rsi": rsi,
+                        "stoch_k": stoch["k"],
+                        "macd_hist": macd["hist"],
+                        "ema20": ema20,
+                        "ema50": ema50,
+                        "ema200": ema200
+                    }
+    except Exception as e:
+        print(f"Błąd pobierania {inst_id} ({bar}): {e}")
+    return None
+
+
+# --- GENEROWANIE RAPORTU PRZEZ GEMINI ---
+async def generate_ai_analysis(tech_summary):
+    client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 1. Pobranie danych z OKX i Blockchain
-    m_data = fetch_all_market_data()
+    prompt = f"""
+    Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor. 
+    Przygotuj profesjonalny raport handlowy na podstawie bieżących wskaźników i sytuacji rynkowej:
+    {tech_summary}
+    
+    Podziel raport na dwie niezależne części:
+    1. Kondycja Rynku, BTC & Smart Money, Starknet (STRK).
+    2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP).
+    """
+    
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",  # Zgodnie z wytycznymi stabilny model
+        contents=prompt
+    )
+    
+    text = response.text
+    # Dzielimy na dwie części (np. po wystąpieniu nagłówka lub w połowie)
+    parts = text.split("Top Selekcja")
+    part1 = parts[0].strip()
+    part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Brak danych sekcji 2."
+    return part1, part2
 
-    # 2. Generowanie raportu przez Gemini API (z zabezpieczeniem 503)
-    report = generate_report(m_data)
 
-    # 3. Zapis lokalnej kopii w repozytorium (UTF-8)
-    with open("latest_report.md", "w", encoding="utf-8") as f:
-        f.write(report)
+# --- WYSYŁKA NA TELEGRAM ---
+async def send_telegram(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    async with aiohttp.ClientSession() as session:
+        # Bez parse_mode, czysty tekst zgodnie z wytycznymi
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+        async with session.post(url, json=payload) as resp:
+            return await resp.text()
 
-    # 4. Wysyłka pliku na serwer FTP (stały URL do odczytu na czacie)
-    upload_to_ftp(report, remote_filename="latest_report.txt")
 
-    # 5. Powiadomienie na Telegram
-    send_telegram_messages(report)
+# --- WYSYŁKA HTML NA FTP ---
+def upload_html_to_ftp(html_content):
+    with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
+        try:
+            ftp.cwd("domains/piwecki.pl/public_html/analiza")
+        except ftplib.error_perm:
+            ftp.cwd("domains/piwecki.pl/public_html")
+            try:
+                ftp.mkd("analiza")
+            except:
+                pass
+            ftp.cwd("analiza")
+            
+        with open("index.html", "w", encoding="utf-8") as f:
+            f.write(html_content)
+            
+        with open("index.html", "rb") as f:
+            ftp.storbinary("STOR index.html", f)
 
-    print("=== Zakończono pomyślnie ===")
+
+# --- GŁÓWNA PĘTLA PROGRAMU ---
+async def main():
+    async with aiohttp.ClientSession() as session:
+        btc_5m = await fetch_market_data(session, "BTC-USDT-SWAP", "5m")
+        btc_1h = await fetch_market_data(session, "BTC-USDT-SWAP", "1h")
+        strk_5m = await fetch_market_data(session, "STRK-USDT-SWAP", "5m")
+        strk_1h = await fetch_market_data(session, "STRK-USDT-SWAP", "1h")
+        
+        tech_summary = f"""
+        BTC 5m: Cena: {btc_5m['close']}, RSI: {btc_5m['rsi']}, StochRSI_K: {btc_5m['stoch_k']}, MACD Hist: {btc_5m['macd_hist']}, EMA20: {btc_5m['ema20']}, EMA50: {btc_5m['ema50']}
+        BTC 1h: Cena: {btc_1h['close']}, RSI: {btc_1h['rsi']}, StochRSI_K: {btc_1h['stoch_k']}, MACD Hist: {btc_1h['macd_hist']}, EMA20: {btc_1h['ema20']}, EMA50: {btc_1h['ema50']}
+        STRK 5m: Cena: {strk_5m['close']}, RSI: {strk_5m['rsi']}, StochRSI_K: {strk_5m['stoch_k']}, MACD Hist: {strk_5m['macd_hist']}, EMA20: {strk_5m['ema20']}, EMA50: {strk_5m['ema50']}
+        STRK 1h: Cena: {strk_1h['close']}, RSI: {strk_1h['rsi']}, StochRSI_K: {strk_1h['stoch_k']}, MACD Hist: {strk_1h['macd_hist']}, EMA20: {strk_1h['ema20']}, EMA50: {strk_1h['ema50']}
+        """
+        
+        part1, part2 = await asyncio.to_thread(asyncio.run, generate_ai_analysis(tech_summary)) if False else await generate_ai_analysis(tech_summary)
+        
+        # Wysyłka na Telegram (2 wiadomości)
+        await send_telegram(part1)
+        await asyncio.sleep(1)
+        await send_telegram(part2)
+        
+        # Budowanie strony HTML z oddzielonymi sekcjami technicznych wskaźników
+        html_content = f"""<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Maker Monitor - Raport Analityczny</title>
+    <style>
+        body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #121214; color: #e1e1e6; margin: 0; padding: 20px; }}
+        .container {{ max-width: 900px; margin: 0 auto; background: #202024; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); }}
+        h1 {{ color: #00b37e; border-bottom: 2px solid #29292e; padding-bottom: 10px; }}
+        h2 {{ color: #61dafb; margin-top: 25px; border-bottom: 1px solid #29292e; padding-bottom: 5px; }}
+        h3 {{ color: #fba94c; margin-top: 15px; }}
+        pre {{ background: #121214; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; color: #c4c4cc; line-height: 1.5; }}
+        .tech-box {{ background: #18181b; padding: 15px; border-radius: 6px; margin-top: 15px; border-left: 4px solid #00b37e; }}
+        .data-row {{ font-family: monospace; font-size: 0.95em; color: #00e676; margin: 6px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Market Maker Monitor - Live Report</h1>
+        
+        <h2>Analiza Rynku i Kondycja</h2>
+        <pre>{part1}</pre>
+
+        <h2>Top Selekcja Altcoinowa</h2>
+        <pre>{part2}</pre>
+
+        <h2>Dane Techniczne i Wskaźniki</h2>
+        
+        <div class="tech-box">
+            <h3>BTC (Bitcoin)</h3>
+            <div class="data-row"><b>5m:</b> Zamknięcie: ${btc_5m['close']} | RSI: {btc_5m['rsi']} | StochRSI K: {btc_5m['stoch_k']} | MACD Hist: {btc_5m['macd_hist']} | EMA20: {btc_5m['ema20']} | EMA50: {btc_5m['ema50']}</div>
+            <div class="data-row"><b>1h:</b> Zamknięcie: ${btc_1h['close']} | RSI: {btc_1h['rsi']} | StochRSI K: {btc_1h['stoch_k']} | MACD Hist: {btc_1h['macd_hist']} | EMA20: {btc_1h['ema20']} | EMA50: {btc_1h['ema50']}</div>
+        </div>
+
+        <div class="tech-box">
+            <h3>STRK (Starknet)</h3>
+            <div class="data-row"><b>5m:</b> Zamknięcie: ${strk_5m['close']} | RSI: {strk_5m['rsi']} | StochRSI K: {strk_5m['stoch_k']} | MACD Hist: {strk_5m['macd_hist']} | EMA20: {strk_5m['ema20']} | EMA50: {strk_5m['ema50']}</div>
+            <div class="data-row"><b>1h:</b> Zamknięcie: ${strk_1h['close']} | RSI: {strk_1h['rsi']} | StochRSI K: {strk_1h['stoch_k']} | MACD Hist: {strk_1h['macd_hist']} | EMA20: {strk_1h['ema20']} | EMA50: {strk_1h['ema50']}</div>
+        </div>
+    </div>
+</body>
+</html>
+"""
+        # Upload pliku index.html do /analiza/ na FTP
+        upload_html_to_ftp(html_content)
+        print("Raport HTML pomyślnie wygenerowany i przesłany na serwer pod https://piwecki.pl/analiza/")
+
+if __name__ == "__main__":
+    asyncio.run(main())
