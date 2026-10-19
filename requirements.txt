@@ -1,2 +1,3 @@
+google-genai
 requests
-google-generativeai
+pandas
