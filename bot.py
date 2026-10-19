@@ -132,7 +132,7 @@ async def fetch_market_data(session, inst_id, bar):
     }
 
 
-# --- GENEROWANIE RAPORTU PRZEZ GEMINI ---
+# --- GENEROWANIE RAPORTU PRZEZ GEMINI (GEMINI-3.8-FLASH) ---
 async def generate_ai_analysis(tech_summary):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
@@ -146,16 +146,22 @@ async def generate_ai_analysis(tech_summary):
     2. Top Selekcja Altcoinowa oraz precyzyjne strefy wejścia/wyjścia (Entry, SL, TP).
     """
     
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt
-    )
-    
-    text = response.text
-    parts = text.split("Top Selekcja")
-    part1 = parts[0].strip()
-    part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Brak danych sekcji 2."
-    return part1, part2
+    for attempt in range(5):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt
+            )
+            text = response.text
+            parts = text.split("Top Selekcja")
+            part1 = parts[0].strip()
+            part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Brak danych sekcji 2."
+            return part1, part2
+        except Exception as e:
+            print(f"Próba {attempt+1} Gemini API nieudana: {e}")
+            await asyncio.sleep(5 * (attempt + 1))
+
+    return "Błąd generowania analizy (przeciążenie API Gemini).", "Spróbuj ponownie przy kolejnym uruchomieniu."
 
 
 # --- WYSYŁKA NA TELEGRAM ---
