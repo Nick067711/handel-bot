@@ -24,7 +24,7 @@ def fetch_okx_data():
     except Exception as e:
         print(f"Błąd pobierania danych OKX SPOT: {e}")
 
-    # Pobieranie rynku SWAP (Perpetual / X-Perp dla STRK itp.)
+    # Pobieranie rynku SWAP
     try:
         url_swap = "https://www.okx.com/api/v5/market/tickers?instType=SWAP"
         res_swap = requests.get(url_swap, timeout=10)
@@ -57,19 +57,17 @@ def run_analysis():
     # Pobranie surowych danych rynkowych (SPOT + SWAP)
     raw_tickers = fetch_okx_data()
     
-    # Rozdzielenie rynku na Top Volume SPOT oraz dedykowane aktywa (STRK i Sonic)
-    spot_tickers = [item for item in raw_tickers if "-USDT" in item.get('instId', '') or "-USDC" in item.get('instId', '')]
+    # Rozdzielenie rynku na Top Volume SPOT oraz dedykowane aktywa
+    spot_tickers = [item for item in raw_tickers if "-USDT" in item.get('instId', '') or "-USDC" in item.get('instId', '') or "/USDC" in item.get('instId', '')]
     
-    # Wyciągnięcie top 40 najbardziej płynnych aktywów SPOT
     top_volume_spot = spot_tickers[:40]
     
-    # Osobne, bezwarunkowe wyciągnięcie pozycji dla STRK (STRKUSD UM X-Perp / STRK-USD-SWAP) oraz Sonic (S/USDC / S-USDC / S-USDT)
+    # Wymuszenie stałej obecności STRK oraz Sonic (S/USDC, S-USDC, S/USDT itp.)
     mandatory_assets = [
         item for item in raw_tickers 
-        if any(target in item.get('instId', '').upper() for target in ["STRK", "S-USDC", "S-USDT", "SONIC"])
+        if any(target in item.get('instId', '').upper() for target in ["STRK", "S-USDC", "S-USDT", "S/USDC", "SONIC"])
     ]
     
-    # Połączenie topowych aktywów z wymuszonymi aktywami (bez powtórzeń)
     final_tickers_list = top_volume_spot + [item for item in mandatory_assets if item not in top_volume_spot]
 
     tickers_summary = []
@@ -82,35 +80,58 @@ def run_analysis():
     
     tickers_text = "\n".join(tickers_summary)
 
-    prompt = f"""
+    # KROK 1: Wstępna analiza przez model
+    prompt_step1 = f"""
 Przeanalizuj poniższe dane rynkowe z giełdy OKX dla tradera dysponującego kapitałem $20k–$30k USD.
 
-Zasady analizy jakościowej:
-1. Zweryfikuj korelację z Bitcoinem (BTC) jako makro-kotwicą rynku.
-2. DEDYKOWANA AUDYTU STRK (STRKUSD UM X-Perp / STRK-USD-SWAP): Przeanalizuj pozycję Starknet (STRK) na podstawie dostarczonych danych rynkowych pod kątem aktualnego statusu, struktury i potencjału.
-3. DEDYKOWANA AUDYTU SONIC (S/USDC lub S/USDT): Przeanalizuj pozycję Sonic (S) na podstawie dostarczonych danych pod kątem struktury cenowej i potencjału.
-4. Filtruj pozostałe altcoiny pod kątem wielotygodniowych korekt cenowych od struktur HH/LH, skrajnych odczytów wskaźników oraz potencjalnych dywergencji.
-5. Wybierz tylko układy o wysokim prawdopodobieństwie sukcesu.
+Zasady analizy:
+1. Zweryfikuj korelację z Bitcoinem (BTC).
+2. Przeanalizuj Starknet (STRK) na podstawie danych.
+3. Przeanalizuj Sonic (S/USDC lub pary z S) ściśle na podstawie faktycznych liczb z tabeli (cena, wolumen). 
+   - UWAGA: Bezwzględnie zakazuje się wspominania o jakichkolwiek "podróbkach", memecoinach czy alternatywnych tokenach. Skup się wyłącznie na właściwej parze S z danych.
+4. Filtruj pozostałe altcoiny pod kątem wielotygodniowych korekt od struktur HH/LH, wskaźników i dywergencji.
 
 Dane rynkowe:
 {tickers_text}
 
-Wygeneruj czytelny, zwięzły raport rynkowy w języku polskim z rekomendacjami dla sesji, sformatowany estetycznie pod czytanie na telefonie.
+Wygeneruj wstępny raport rynkowy.
 """
 
-    print("Przesyłanie danych do analizy AI...")
-    
-    response = client.models.generate_content(
+    print("Generowanie wstępnej analizy AI...")
+    response1 = client.models.generate_content(
         model='gemini-3.8-flash',
-        contents=prompt,
+        contents=prompt_step1,
+    )
+    draft_report = response1.text
+
+    # KROK 2: Automatyczny audyt sam siebie (Fact-checking loop)
+    prompt_step2 = f"""
+Jesteś rygorystycznym audytorem finansowym i fact-checkerem. Twoim zadaniem jest sprawdzenie poniższego szkicu raportu pod kątem błędu halucynacji (zmyślania danych).
+
+Oto oryginalne, surowe dane z giełdy OKX:
+{tickers_text}
+
+Oto wstępny szkic raportu do weryfikacji:
+{draft_report}
+
+Zasady audytu:
+1. Zweryfikuj każdą cenę i wolumen w szkicu z oryginalnymi danymi z OKX. Jeśli w szkicu pojawiły się zmyślone obroty lub liczby spoza tabeli, bezwzględnie je skoryguj do prawdziwych wartości z danych źródłowych.
+2. Sprawdź sekcję dotyczącą Sonic (S/USDC / S): Upewnij się, że opiera się ściśle na rzeczywistym wolumenie z danych. BEZWZGLĘDNIE ZAKAZANE JEST wspominanie o jakichkolwiek "podróbkach", klonach czy ostrzeganie przed nimi – użytkownik ich nie chce.
+3. Usuń wszelkie przekłamania i wygeneruj ostateczny, czysty, w pełni zweryfikowany raport w języku polskim, gotowy do wysyłki na Telegram.
+"""
+
+    print("Przeprowadzanie automatycznego audytu (self-correction)...")
+    response2 = client.models.generate_content(
+        model='gemini-3.8-flash',
+        contents=prompt_step2,
     )
     
-    report_text = response.text
-    print("Analiza ukończona.")
+    final_report = response2.text
+    print("Analiza i audyt ukończone.")
 
     # Formatowanie wiadomości pod Telegram
-    header = "🚨 *Raport Rynkowy AI — Monitoring OKX, STRK & SONIC*\n\n"
-    full_message = header + report_text
+    header = "🚨 *Raport Rynkowy AI (Zweryfikowany) — OKX, STRK & SONIC*\n\n"
+    full_message = header + final_report
     
     if len(full_message) > 4000:
         full_message = full_message[:3900] + "\n\n*(Wiadomość przycięta ze względu na limit długości)*"
