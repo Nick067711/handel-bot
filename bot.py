@@ -42,19 +42,18 @@ def fetch_btc_onchain_data():
     return onchain_info
 
 def send_telegram_message(message):
-    """Wysyła wiadomość bezpośrednio na Telegram."""
+    """Wysyła wiadomość bezpośrednio na Telegram (zwykły tekst - brak błędów parse_mode)."""
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         payload = {
             "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "Markdown"
+            "text": message
         }
         res = requests.post(url, json=payload, timeout=10)
         if res.status_code == 200:
             print("Wiadomość na Telegram została pomyślnie wysłana!")
         else:
-            print(f"Błąd wysyłki na Telegram: {res.text}")
+            print(f"Błąd wysyłki na Telegram (kod {res.status_code}): {res.text}")
     except Exception as e:
         print(f"Błąd wysyłki na Telegram: {e}")
 
@@ -92,7 +91,7 @@ def run_analysis():
     prompt1 = f"""
 Jesteś analitykiem krypto. Stwórz czytelną, zwięzłą CZĘŚĆ 1 raportu w języku polskim dla kluczowych aktywów.
 
-Dla każdego z nich określ **bezpieczne widełki pozycji/zaangażowania kapitałowego** wynikające z jego płynności na OKX.
+Dla każdego z nich określ bezpieczne widełki pozycji/zaangażowania kapitałowego wynikające z jego płynności na OKX.
 
 Dane On-Chain BTC:
 {btc_onchain}
@@ -101,13 +100,13 @@ Dane kluczowych aktywów OKX:
 {key_text}
 
 STRUKTURA:
-1. 🪙 **BITCOIN & SMART MONEY**:
+1. BITCOIN & SMART MONEY:
    - Kondycja makro BTC, sentyment i zwięzła ocena kierunku rynku.
    - Safe Position Size (Bezpieczne widełki pozycji w USD).
-2. ⚡ **STARKNET (STRK)**:
+2. STARKNET (STRK):
    - Ocena strukturalna i jednoznaczna decyzja (np. Akumulacja / Stay Aside).
    - Safe Position Size.
-3. 🌀 **SONIC (S / S/USDC)**:
+3. SONIC (S / S/USDC):
    - Analiza właściwej pary S (bezwzględny zakaz pisania o podróbkach/memecoinach).
    - Safe Position Size.
 """
@@ -118,7 +117,7 @@ STRUKTURA:
         contents=prompt1,
     )
     
-    header1 = "📊 *CZĘŚĆ 1: KONDYCJA RYNKU, BTC, STRK & SONIC*\n\n"
+    header1 = "📊 CZĘŚĆ 1: KONDYCJA RYNKU, BTC, STRK & SONIC\n\n"
     send_telegram_message(header1 + res1.text.strip())
 
     # --- ZAPYTANIE 2: TOP SELEKCJA ALTCOINOWA ---
@@ -144,11 +143,11 @@ Lista altcoinów z OKX:
 {alt_text}
 
 STRUKTURA DLA KAŻDEGO WYBRANEGO ALTCOINA (Maksymalnie 2-3):
-- **Symbol** i opisu układu (1 zdanie)
-- **Strefa Wejścia (Entry)**
-- **Stop Loss (SL)**
-- **Take Profit (TP)**
-- **Bezpieczne widełki pozycji**: Sugerowany przedział kapitału wynikający z płynności tokena.
+- Symbol i opis układu (1 zdanie)
+- Strefa Wejścia (Entry)
+- Stop Loss (SL)
+- Take Profit (TP)
+- Bezpieczne widełki pozycji: Sugerowany przedział kapitału wynikający z płynności tokena.
 """
 
     print("Generowanie Części 2 (Skaner Altcoinów)...")
@@ -157,7 +156,7 @@ STRUKTURA DLA KAŻDEGO WYBRANEGO ALTCOINA (Maksymalnie 2-3):
         contents=prompt2,
     )
 
-    header2 = "🎯 *CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA*\n\n"
+    header2 = "🎯 CZĘŚĆ 2: TOP SELEKCJA ALTCOINOWA\n\n"
     send_telegram_message(header2 + res2.text.strip())
 
 if __name__ == "__main__":
