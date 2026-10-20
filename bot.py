@@ -162,18 +162,16 @@ class HistoricalPatternEngine:
             cost_basis_status = "TEST_TRUE_MARKET_MEAN (~77.5k)"
 
         pattern_signal = "NEUTRAL"
-        notes = f"Reżim: {regime}. Miesięczny MACD rośnie: {monthly_macd_turning_up}. Cost Basis Zone: {cost_basis_status}. Dywergencje -> 1W: {div_1w}, 1D: {div_1d}."
+        notes = f"Reżim: {regime}. Miesięczny MACD rośnie: {monthly_macd_turning_up}. Cost Basis Zone: {cost_basis_status}."
         
         if regime.startswith("HOSSA"):
             if monthly_macd_turning_up and (div_1w == "BYCZA_DYWERGENCJA" or cost_basis_status != "NEUTRAL_ZONE" or rsi_4h < 35):
                 pattern_signal = "POTENTIAL_LONG_SETUP"
-                notes += " Silne potwierdzenie makro dna i obrony bazy kosztowej w hossie."
             else:
                 pattern_signal = "POTENTIAL_LONG_SWING"
         else:
             if monthly_macd_turning_up:
                 pattern_signal = "POTENTIAL_MACRO_BOTTOM_WATCH"
-                notes += " Sygnał zwrotu na interwale miesięcznym w strukturze bessy."
             else:
                 pattern_signal = "POTENTIAL_SHORT_SETUP"
 
@@ -250,7 +248,6 @@ async def fetch_bybit_candles(session, symbol, bar):
     return None
 
 async def fetch_aggregated_market_data(session, symbol, bar):
-    """Pobiera i uśrednia wskaźniki z OKX, Binance, Kraken i Bybit"""
     tasks = [
         fetch_okx_candles(session, symbol, bar),
         fetch_binance_candles(session, symbol, bar),
@@ -337,7 +334,6 @@ async def fetch_derivatives_and_liquidations(session):
         "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
     
-    # Open Interest OKX
     try:
         url_oi_okx = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
         async with session.get(url_oi_okx, timeout=8) as resp:
@@ -348,7 +344,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI OKX error: {e}")
 
-    # Open Interest Bybit
     try:
         url_oi_bybit = "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=4h&limit=1"
         async with session.get(url_oi_bybit, timeout=8) as resp:
@@ -360,7 +355,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI Bybit error: {e}")
 
-    # Funding Rate OKX
     try:
         url_fr_okx = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP"
         async with session.get(url_fr_okx, timeout=8) as resp:
@@ -372,7 +366,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate OKX error: {e}")
 
-    # Funding Rate Bybit
     try:
         url_fr_bybit = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
         async with session.get(url_fr_bybit, timeout=8) as resp:
@@ -385,7 +378,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate Bybit error: {e}")
 
-    # Statystyki likwidacji z Bybit
     try:
         url_liq = "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=BTCUSDT&limit=50"
         async with session.get(url_liq, timeout=8) as resp:
@@ -401,7 +393,7 @@ async def fetch_derivatives_and_liquidations(session):
     return derivatives_info
 
 
-# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI ---
+# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI (TYLKO DLA TELEGRAMA) ---
 async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_extremes, max_retries=3, initial_delay=4):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
@@ -443,7 +435,6 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
         delay = initial_delay
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"Wywoływanie Gemini z modelem: {model_name} (próba {attempt})")
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt
@@ -455,9 +446,9 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
                     part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Altcoinowa z OKX: Brak dodatkowych wskazań."
                     return part1, part2
             except APIError as e:
-                print(f"Ostrzeżenie API Gemini {model_name} ({attempt}/{max_retries}): {e}")
+                print(f"Ostrzeżenie API Gemini {model_name}: {e}")
             except Exception as e:
-                print(f"Błąd wywołania {model_name} ({attempt}/{max_retries}): {e}")
+                print(f"Błąd wywołania {model_name}: {e}")
                 
             if attempt < max_retries:
                 await asyncio.sleep(delay)
@@ -502,7 +493,7 @@ def upload_html_to_ftp(html_content):
                 
             with open("index.html", "rb") as f:
                 ftp.storbinary("STOR index.html", f)
-            print("Pomyślnie wysłano pełny plik index.html na FTP (piwecki.pl/analiza).")
+            print("Pomyślnie wysłano czyste repozytorium danych na FTP (piwecki.pl/analiza).")
     except Exception as e:
         print(f"Błąd przesyłania FTP: {e}")
 
@@ -546,15 +537,13 @@ async def main():
         for item in okx_extremes[:3]:
             okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI: {item['rsi']}\n"
 
-        # 1. Generujemy analizę AI za pomocą Gemini na Telegram
+        # 1. Generujemy analizę AI wyłącznie na Telegram
         part1, part2 = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_summary)
-        
-        # 2. Wysyłamy dwie wiadomości na Telegram
         await send_telegram(part1)
         await asyncio.sleep(1)
         await send_telegram(part2)
         
-        # 3. Budujemy bogate tabele HTML zawierające WSZYSTKIE pobrane dane ze wszystkich giełd
+        # 2. Budujemy potężne, czysto analityczne repozytorium danych do pliku HTML (BEZ TEKSTU AI)
         html_boxes = ""
         for sym in symbols:
             rows = ""
@@ -622,7 +611,6 @@ async def main():
         h1 {{ color: #00e676; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
         h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
         h3 {{ color: #ffab40; margin-top: 20px; }}
-        pre {{ background: #0f1115; padding: 18px; border-radius: 8px; white-space: pre-wrap; word-wrap: break-word; color: #d0d4dc; font-size: 0.95em; border: 1px solid #232730; }}
         .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #00e676; }}
         .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
         .badge {{ background: #232730; color: #00e676; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
@@ -641,14 +629,7 @@ async def main():
         <h1>Market Maker Monitor — Live Analytical Database</h1>
         <p>Data aktualizacji: <b>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</b></p>
         
-        <h2>1. Raport Syntetyczny (Opracowanie AI Gemini)</h2>
-        <h3>Część I: Kondycja Rynku, BTC, STRK, Sonic (S)</h3>
-        <pre>{part1}</pre>
-
-        <h3>Część II: Top Selekcja Altcoinowa</h3>
-        <pre>{part2}</pre>
-
-        <h2>2. Rynek Pochodnych, Funding Rates & Baza Kosztowa On-Chain</h2>
+        <h2>1. Rynek Pochodnych, Funding Rates & Baza Kosztowa On-Chain</h2>
         <div class="deriv-grid">
             <div class="deriv-card">
                 <span>Open Interest (OKX)</span>
@@ -667,12 +648,12 @@ async def main():
                 <strong>{deriv_data['funding_rate_bybit']}</strong>
             </div>
         </div>
-        <div class="tech-card" style="border-left-color: #40c4ff;">
+        <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
             <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
 
-        <h2>3. Skan Ekstremów Płynnościowych OKX (Akapit 1D)</h2>
+        <h2>2. Skan Ekstremów Płynnościowych OKX (Wszystkie monitorowane altcoiny 1D)</h2>
         <table>
             <thead>
                 <tr>
@@ -687,15 +668,15 @@ async def main():
             </tbody>
         </table>
 
-        <h2>4. Pełne Zestawienie Wskaźników Technicznych z 4 Giełd (OKX, Binance, Kraken, Bybit)</h2>
+        <h2>3. Pełne Zestawienie Wskaźników Technicznych z 4 Giełd (OKX, Binance, Kraken, Bybit)</h2>
         {html_boxes}
     </div>
 </body>
 </html>
 """
-        # 4. Wysłanie kompletnego pliku HTML na FTP
+        # 3. Wysłanie czystego repozytorium danych na FTP
         upload_html_to_ftp(html_content)
-        print("Proces zakończony pomyślnie. Plik HTML zapisany ze wszystkimi danymi ze wszystkich giełd.")
+        print("Proces zakończony pomyślnie. Plik HTML zawiera komplet surowych danych i wskaźników.")
 
 if __name__ == "__main__":
     asyncio.run(main())
