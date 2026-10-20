@@ -9,16 +9,16 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# --- POMOCNIK: KONWERSJA TYPÓW NUMPY DO JSON ---
+# --- POMOCNIK: KONWERSJA TYPÓW NUMPY DO JSON (KOMPATYBILNY Z NUMPY 2.0+) ---
 def clean_for_json(obj):
     """Rekurencyjnie konwertuje typy numpy na standardowe typy Pythona dla bezpiecznego JSON."""
     if isinstance(obj, dict):
-        return {k: clean_for_json(v) for k, v in obj.items()}
+        return {str(k): clean_for_json(v) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [clean_for_json(v) for v in obj]
-    elif isinstance(obj, (np.float_, np.float32, np.float64)):
+    elif isinstance(obj, np.floating):
         return float(obj)
-    elif isinstance(obj, (np.int_, np.int32, np.int64)):
+    elif isinstance(obj, np.integer):
         return int(obj)
     return obj
 
@@ -299,6 +299,10 @@ def get_okx_top_extremes():
 def generate_ai_report(market_data, derivatives_data, macro_sentiment):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     
+    clean_market = clean_for_json(market_data)
+    clean_deriv = clean_for_json(derivatives_data)
+    clean_macro = clean_for_json(macro_sentiment)
+    
     prompt = f"""
 Jesteś wybitnym analitykiem rynków kryptowalut. Masz do dyspozycji:
 1. Surowe dane i uśrednione wskaźniki multi-exchange (OKX, Binance, Kraken, Bybit).
@@ -344,9 +348,9 @@ Wybierz 3 projekty z OKX o największym ekstremum strukturalnym:
    - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
 
 Dane analityczne, makro i sentyment:
-{clean_for_json(market_data)}
-{clean_for_json(derivatives_data)}
-{clean_for_json(macro_sentiment)}
+{clean_market}
+{clean_deriv}
+{clean_macro}
 """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
