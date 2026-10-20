@@ -323,7 +323,7 @@ async def fetch_okx_top_extremes(session):
     return results
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & WIELOGIEŁDOWY SKAN PŁYNNOŚCI (BTC + STRK) ---
+# --- 4. OPEN INTEREST, FUNDING RATES & WIELOGIEŁDOWY SKAN PŁYNNOŚCI (BUFOR 10%) ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -422,58 +422,87 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
 
-    # 8. WIELOGIEŁDOWY SKAN PŁYNNOŚCI BITCOINA (BTC) - OKX, Binance, Bybit, Kraken
+    # Pobieramy bieżącą cenę rynkową BTC z Binance jako punkt odniesienia do bufora 10%
+    btc_current_price = 82800.0
+    try:
+        async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                btc_current_price = float(res.get("price", 82800.0))
+    except Exception:
+        pass
+
+    lower_bound = btc_current_price * 0.90  # -10%
+    upper_bound = btc_current_price * 1.10  # +10%
+
+    # 8. WIELOGIEŁDOWY SKAN PŁYNNOŚCI BITCOINA (BTC) Z FILTREM 10%
     btc_walls = []
     
     # OKX BTC
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=100", timeout=8) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=400", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 data = res.get("data", [])
                 if data:
                     for ask in data[0].get("asks", []):
-                        btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "OKX"})
+                        p, s = float(ask[0]), float(ask[1])
+                        if btc_current_price <= p <= upper_bound:
+                            btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "OKX"})
                     for bid in data[0].get("bids", []):
-                        btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "OKX"})
+                        p, s = float(bid[0]), float(bid[1])
+                        if lower_bound <= p <= btc_current_price:
+                            btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "OKX"})
     except Exception as e:
         print(f"BTC OKX Book error: {e}")
 
     # Binance BTC
     try:
-        async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100", timeout=8) as resp:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=500", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
-                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Binance"})
+                    p, s = float(ask[0]), float(ask[1])
+                    if btc_current_price <= p <= upper_bound:
+                        btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Binance"})
                 for bid in res.get("bids", []):
-                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Binance"})
+                    p, s = float(bid[0]), float(bid[1])
+                    if lower_bound <= p <= btc_current_price:
+                        btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Binance"})
     except Exception as e:
         print(f"BTC Binance Book error: {e}")
 
     # Bybit BTC
     try:
-        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=50", timeout=8) as resp:
+        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 result = res.get("result", {})
                 for ask in result.get("a", []):
-                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Bybit"})
+                    p, s = float(ask[0]), float(ask[1])
+                    if btc_current_price <= p <= upper_bound:
+                        btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Bybit"})
                 for bid in result.get("b", []):
-                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Bybit"})
+                    p, s = float(bid[0]), float(bid[1])
+                    if lower_bound <= p <= btc_current_price:
+                        btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Bybit"})
     except Exception as e:
         print(f"BTC Bybit Book error: {e}")
 
     # Kraken BTC
     try:
-        async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=50", timeout=8) as resp:
+        async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=100", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 result = res.get("result", {}).get("XXBTZUSDT", {}) or res.get("result", {}).get("XBTUSDT", {})
                 for ask in result.get("asks", []):
-                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Kraken"})
+                    p, s = float(ask[0]), float(ask[1])
+                    if btc_current_price <= p <= upper_bound:
+                        btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Kraken"})
                 for bid in result.get("bids", []):
-                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Kraken"})
+                    p, s = float(bid[0]), float(bid[1])
+                    if lower_bound <= p <= btc_current_price:
+                        btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Kraken"})
     except Exception as e:
         print(f"BTC Kraken Book error: {e}")
 
@@ -484,29 +513,49 @@ async def fetch_derivatives_and_liquidations(session):
         bid_str = f"Ściana Wsparcia (Bid): ${max_btc_bid['price']:,.2f} ({max_btc_bid['size']:,.2f} BTC na {max_btc_bid['ex']})" if max_btc_bid else "Brak"
         derivatives_info["liquidation_map_btc"] = f"{ask_str} | {bid_str}"
 
-    # 9. SKAN PŁYNNOŚCI STRK - Ściany Asks oraz Bids z wielu giełd
+    # 9. SKAN PŁYNNOŚCI STRK (z buforem 10%)
+    strk_current_price = 0.058
+    try:
+        async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=STRKUSDT", timeout=5) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                strk_current_price = float(res.get("price", 0.058))
+    except Exception:
+        pass
+
+    strk_lower = strk_current_price * 0.90
+    strk_upper = strk_current_price * 1.10
+
     strk_walls = []
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=100", timeout=8) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=400", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 data = res.get("data", [])
                 if data:
                     for ask in data[0].get("asks", []):
-                        strk_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "OKX"})
+                        p, s = float(ask[0]), float(ask[1])
+                        if strk_current_price <= p <= strk_upper:
+                            strk_walls.append({"type": "Ask", "price": p, "size": s, "ex": "OKX"})
                     for bid in data[0].get("bids", []):
-                        strk_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "OKX"})
+                        p, s = float(bid[0]), float(bid[1])
+                        if strk_lower <= p <= strk_current_price:
+                            strk_walls.append({"type": "Bid", "price": p, "size": s, "ex": "OKX"})
     except Exception as e:
         print(f"OKX Book scan error: {e}")
 
     try:
-        async with session.get("https://api.binance.com/api/v3/depth?symbol=STRKUSDT&limit=100", timeout=8) as resp:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=STRKUSDT&limit=500", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
-                    strk_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Binance"})
+                    p, s = float(ask[0]), float(ask[1])
+                    if strk_current_price <= p <= strk_upper:
+                        strk_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Binance"})
                 for bid in res.get("bids", []):
-                    strk_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Binance"})
+                    p, s = float(bid[0]), float(bid[1])
+                    if strk_lower <= p <= strk_current_price:
+                        strk_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Binance"})
     except Exception as e:
         print(f"Binance Book scan error: {e}")
 
@@ -554,13 +603,13 @@ DANE POCHODNE I LIKWIDACJE:
 - Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
 - Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
 - Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
-- Wielogiełdowa Mapa Płynności / Ściany BTC: {deriv_data['liquidation_map_btc']}
-- Wielogiełdowa Mapa Płynności STRK: {deriv_data['liquidation_map_strk']}
+- Wielogiełdowa Mapa Płynności / Ściany BTC (bufor 10%): {deriv_data['liquidation_map_btc']}
+- Wielogiełdowa Mapa Płynności STRK (bufor 10%): {deriv_data['liquidation_map_strk']}
 - Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
 PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając mapy płynności i ściany zleceń z wielu giełd, S (Sonic).
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając głębokie mapy płynności i ściany zleceń z wielu giełd, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -785,8 +834,8 @@ async def main():
             </div>
         </div>
         <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Wielogiełdowa Mapa Płynności / Ściany BTC (OKX, Binance, Bybit, Kraken):</b> {deriv_data['liquidation_map_btc']}</p>
-            <p><b>Wielogiełdowa Mapa Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
+            <p><b>Wielogiełdowa Mapa Płynności / Ściany BTC (Bufor 10% — OKX, Binance, Bybit, Kraken):</b> {deriv_data['liquidation_map_btc']}</p>
+            <p><b>Wielogiełdowa Mapa Płynności STRK (Bufor 10%):</b> {deriv_data['liquidation_map_strk']}</p>
             <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
