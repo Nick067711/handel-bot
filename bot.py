@@ -9,6 +9,19 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
+# --- POMOCNIK: KONWERSJA TYPÓW NUMPY DO JSON ---
+def clean_for_json(obj):
+    """Rekurencyjnie konwertuje typy numpy na standardowe typy Pythona dla bezpiecznego JSON."""
+    if isinstance(obj, dict):
+        return {k: clean_for_json(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_for_json(v) for v in obj]
+    elif isinstance(obj, (np.float_, np.float32, np.float64)):
+        return float(obj)
+    elif isinstance(obj, (np.int_, np.int32, np.int64)):
+        return int(obj)
+    return obj
+
 # --- 1. SILNIK ANALIZY TECHNICZNEJ (Logika Claude + AN-1) ---
 class TechnicalEngine:
     @staticmethod
@@ -91,7 +104,7 @@ class TechnicalEngine:
 
     @staticmethod
     def analyze_structure_and_signals(closes):
-        """Zaawansowana logika Claude do wyznaczania prawdopodobnych punktów wejścia Long/Short."""
+        """Zaawansowana logika do wyznaczania prawdopodobnych punktów wejścia Long/Short."""
         if not closes or len(closes) < 50:
             return {"status": "Brak danych", "signal": "NEUTRAL"}
         c = np.array(closes)
@@ -282,9 +295,9 @@ def get_okx_top_extremes():
     return results[:3]
 
 
-# --- 5. SYNTEZA PRZEZ MODEL AI  ---
+# --- 5. SYNTEZA PRZEZ MODEL AI (Gemini 3.8-flash) ---
 def generate_ai_report(market_data, derivatives_data, macro_sentiment):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
 Jesteś wybitnym analitykiem rynków kryptowalut. Masz do dyspozycji:
@@ -331,9 +344,9 @@ Wybierz 3 projekty z OKX o największym ekstremum strukturalnym:
    - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
 
 Dane analityczne, makro i sentyment:
-{market_data}
-{derivatives_data}
-{macro_sentiment}
+{clean_for_json(market_data)}
+{clean_for_json(derivatives_data)}
+{clean_for_json(macro_sentiment)}
 """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -353,10 +366,10 @@ Dane analityczne, makro i sentyment:
                     if "content" in candidate and "parts" in candidate["content"]:
                         return candidate["content"]["parts"][0]["text"]
                     else:
-                        print(f"Ostrzeżenie Gemini (brak content/parts, np. blokada bezpieczeństwa): {candidate}")
+                        print(f"Ostrzeżenie Gemini (brak content/parts): {candidate}")
                         return f"Błąd AI: Odpowiedź zablokowana lub pusta."
                 else:
-                    print(f"Ostrzeżenie Gemini (brak candidates w JSON): {res_json}")
+                    print(f"Ostrzeżenie Gemini (brak candidates): {res_json}")
                     return "Błąd AI: Brak kandydatów w odpowiedzi."
                     
             elif resp.status_code in [429, 503]:
@@ -367,7 +380,7 @@ Dane analityczne, makro i sentyment:
                 print(f"Gemini API Error: {resp.status_code} - {resp.text}")
                 break
         except Exception as e:
-            print(f"Wyjątek podczas łączenia z Gemini (próba {attempt+1}): {e}")
+            print(f"SZCZEGÓŁOWY BŁĄD podczas łączenia z Gemini (próba {attempt+1}): {e}")
             time.sleep(2 ** attempt)
             
     return "Błąd generowania raportu przez AI."
