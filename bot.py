@@ -384,8 +384,8 @@ async def fetch_derivatives_and_liquidations(session):
             if resp.status == 200:
                 res = await resp.json()
                 trades = res.get("result", {}).get("list", [])
-                large_sells = sum(1 for t in trades if t.get("side"] == "Sell" and float(t.get("size", 0)) > 2.0)
-                large_buys = sum(1 for t in trades if t.get("side"] == "Buy" and float(t.get("size", 0)) > 2.0)
+                large_sells = sum(1 for t in trades if t.get("side") == "Sell" and float(t.get("size", 0)) > 2.0)
+                large_buys = sum(1 for t in trades if t.get("side") == "Buy" and float(t.get("size", 0)) > 2.0)
                 derivatives_info["liquidations_bybit"] = f"Presja Buy: {large_buys} | Presja Sell: {large_sells} dużych transakcji"
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
