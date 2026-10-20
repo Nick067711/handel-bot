@@ -9,7 +9,7 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ I WZORCÓW HISTORYCZNYCH (1M, 1W, 1D, 4H, 1H + Cost Basis) ---
+# --- 1. SILNIK ANALIZY TECHNICZNEJ I WZORCÓW HISTORYCZNYCH ---
 class HistoricalPatternEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -151,7 +151,7 @@ class HistoricalPatternEngine:
         }
 
 
-# --- 2. POBIERANIE DANYCH SPOT / ŚWIECE Z WIELU GIEŁD (w tym 1M) ---
+# --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD ---
 def fetch_okx_candles(symbol, bar):
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W", "1M": "1M"}
     inst_id = f"{symbol}-USDT-SWAP" if "USDT" not in symbol else symbol
@@ -255,7 +255,7 @@ def fetch_derivatives_data(symbol):
     return derivatives
 
 
-# --- 4. KONTEKST MAKROEKONOMICZNY I SENTYMENT ---
+# --- 4. KONTEKST MAKRO I SENTYMENT ---
 def fetch_macro_and_sentiment_context():
     onchain_info = "Brak danych on-chain"
     try:
@@ -343,42 +343,35 @@ Jesteś wybitnym analitykiem rynków kryptowalut. Masz do dyspozycji:
 2. Dane pochodne (Open Interest, Funding Rate, Likwidacje).
 3. Kontekst makroekonomiczny z USA (FED) oraz sentyment.
 
-Przeprowadź głęboką syntezę, oceniając sygnały z silnika historycznego w zestawieniu z płynnością i pochodnymi, a następnie przygotuj raport taktyczny na Telegrama.
+Przeprowadź głęboką syntezę i przygotuj JEDNĄ skondensowaną wiadomość na Telegrama.
 
 BEZWZGLĘDNE ZASADY FORMATOWANIA TELEGRAMA:
 1. ŻADNEGO WSTĘPU. Wiadomość zaczyna się NATYCHMIAST od nagłówka BTC.
-2. **MONITORING CYKLU (SZCZYT HOSSY / DNO BESSY / LOKALNE DNA):** Przeanalizuj dane pod kątem ekstremów cyklu i dywergencji 1M/1W. JEŚLI wykryjesz historyczne ekstremum, umieść na samej górze sekcji BTC komunikat: `🚨 **ALERT CYKLICZNY: [SZCZYT HOSSY / DNO BESSY] NA BTC!** 🚨`. Jeśli nie, zacznij bezpośrednio od nagłówka BTC.
-3. ŻADNYCH WSPOMNIEŃ O WARTOŚCIACH WSKAŹNIKÓW w tekście (zakaz podawania liczb RSI, MACD – użytkownik czyta je sam z wykresów). Skup się wyłącznie na strukturze ceny, dywergencjach, reżimie rynku, strefach bazy kosztowej, płynności, OI, likwidacjach i sentymentzie.
-4. Dla każdego głównego aktywa podaj precyzyjne poziomy dla pozycji Long oraz Short wraz z szacowanym wielodniowym horyzontem trzymania pozycji.
+2. BEZWZGLĘDNY ZAKAZ PODAWANIA LICZB/WARTOŚCI WSKAŹNIKÓW (brak podawania RSI, MACD w tekście). Użytkownik odczytuje wartości sam z pliku HTML.
+3. AKTYWA TARGETOWE: BTC, STRK (Starknet) oraz S (Sonic / S/USDC). Uwaga: 'S' oznacza Sonic, nie pomył z Solaną (SOL).
+4. Przekaz ma być ultrazwięzły, skupiony wyłącznie na strukturze, reżimie rynkowym, strefach wsparcia/oporu oraz płynności.
 
-STRUKTURA RAPORTU:
+STRUKTURA WYŚCIOWA (JEDNA WIADOMOŚĆ):
 
 ### BTC
-[Precyzyjny opis sytuacji z uwzględnieniem miesięcznego MACD, stref bazy kosztowej on-chain, dywergencji i makro].
-Przeanalizowane poziomy:
-- Long: Przedział cenowy [X - Y] | Zasięg/TP (zamknięcie): [Cena]
-- Short: Przedział cenowy [X - Y] | Zasięg/TP (zamknięcie, horyzont wielodniowy): [Cena]
+[Zwięzła analiza strukturalna bez cyfr przy wskaźnikach]
+- Long: Przedział [X - Y] | Zasięg: [Cena]
+- Short: Przedział [X - Y] | Zasięg: [Cena] (wielodniowy swing)
 
 ### STRK
-[Opis w kontekście kondycji rynku, BTC, sentymentu i danych pochodnych].
-Przeanalizowane poziomy:
-- Long: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
-- Short: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
+[Zwięzła analiza Starknet]
+- Long: Przedział [X - Y] | Zasięg: [Cena]
+- Short: Przedział [X - Y] | Zasięg: [Cena]
 
-### S (Solana)
-[Opis w kontekście makro i technicznym].
-Przeanalizowane poziomy:
-- Long: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
-- Short: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
+### S (Sonic)
+[Zwięzła analiza Sonic]
+- Long: Przedział [X - Y] | Zasięg: [Cena]
+- Short: Przedział [X - Y] | Zasięg: [Cena]
 
-### TOP 3 OKX (Ekstremalne Okazje 1W/1D)
-Wybierz 3 projekty z OKX o największym ekstremum strukturalnym:
-1. **[Nazwa Altcoina]**: [Krótki kontekst].
-   - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
-2. **[Nazwa Altcoina]**: [Krótki kontekst].
-   - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
-3. **[Nazwa Altcoina]**: [Krótki kontekst].
-   - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
+### TOP 3 SELEKCJA OKX
+1. **[Nazwa Altcoina]**: Wejście [Long/Short]: [X - Y] | TP: [Cena] | Safe Size: [Widełki]
+2. **[Nazwa Altcoina]**: Wejście [Long/Short]: [X - Y] | TP: [Cena] | Safe Size: [Widełki]
+3. **[Nazwa Altcoina]**: Wejście [Long/Short]: [X - Y] | TP: [Cena] | Safe Size: [Widełki]
 
 Dane analityczne i wzorce historyczne:
 {market_data}
@@ -411,7 +404,7 @@ Dane analityczne i wzorce historyczne:
     return "Błąd generowania raportu przez AI."
 
 
-# --- 6. GENEROWANIE PLIKU HTML (`index.html`) ---
+# --- 6. GENEROWANIE PLIKU HTML ---
 def generate_html_report(aggregated_data, derivatives_data, macro_sentiment, top_extremes):
     html_content = f"""<!DOCTYPE html>
 <html lang="pl">
@@ -504,23 +497,25 @@ def generate_html_report(aggregated_data, derivatives_data, macro_sentiment, top
 
 
 def send_telegram_message(text):
+    """Wysyła jedną skondensowaną wiadomość jako zwykły tekst bez parse_mode."""
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown"
+        "text": text
     }
     try:
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code != 200:
             print(f"Telegram Send Error: {resp.text}")
+        else:
+            print("Pomyślnie wysłano raport na Telegram!")
     except Exception as e:
         print(f"Telegram Exception: {e}")
 
 
 def main():
     print("Rozpoczynanie pobierania danych, analizy top-down 1M/1W/1D i pochodnych...")
-    symbols = ["BTC", "STRK", "SOL", "SUI"]
+    symbols = ["BTC", "STRK", "S", "SUI"]
     
     market_data = {}
     derivatives_data = {}
@@ -533,13 +528,13 @@ def main():
     top_extremes = get_okx_top_extremes()
     
     print("Przekazywanie kompletnego zestawu danych do AI (Gemini)...")
-    telegram_text = generate_ai_report({
+    ai_response = generate_ai_report({
         "main_assets": market_data,
         "okx_extremes": top_extremes
     }, derivatives_data, macro_sentiment)
     
     print("Wysyłanie ostatecznego raportu na Telegram...")
-    send_telegram_message(telegram_text)
+    send_telegram_message(ai_response)
     
     print("Generowanie pliku index.html dla serwera FTP...")
     generate_html_report(market_data, derivatives_data, macro_sentiment, top_extremes)
