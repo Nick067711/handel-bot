@@ -145,8 +145,8 @@ class HistoricalPatternEngine:
         ema200_1d = cls.calculate_ema(c_1d, 200) if len(c_1d) >= 200 else cls.calculate_ema(c_1d, len(c_1d))
         regime = "HOSSA (Bullish Regime)" if close_price > ema200_1d else "BESSA (Bearish Regime)"
         
-        macd_1m = cls.calculate_macd(c_1m) if len(c_1m) >= 35 else {"hist": 0.0}
-        macd_1m_prev = cls.calculate_macd(c_1m[:-1]) if len(c_1m) >= 36 else {"hist": 0.0}
+        macd_1m = cls.calculate_macd(c_1m) if len(c_1m) >= 35 else {"macd": 0.0, "signal": 0.0, "hist": 0.0}
+        macd_1m_prev = cls.calculate_macd(c_1m[:-1]) if len(c_1m) >= 36 else {"macd": 0.0, "signal": 0.0, "hist": 0.0}
         monthly_macd_turning_up = macd_1m["hist"] > macd_1m_prev["hist"]
         
         div_1w = cls.detect_multi_timeframe_divergence(c_1w)
@@ -276,6 +276,8 @@ async def fetch_aggregated_market_data(session, symbol, bar):
                 "close": closes[-1],
                 "rsi": rsi,
                 "stoch_k": stoch["k"],
+                "macd_line": macd["macd"],
+                "macd_signal": macd["signal"],
                 "macd_hist": macd["hist"],
                 "ema20": ema20,
                 "ema50": ema50,
@@ -284,7 +286,8 @@ async def fetch_aggregated_market_data(session, symbol, bar):
 
     if not valid_indicators:
         return {
-            "close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, 
+            "close": 0.0, "rsi": 50.0, "stoch_k": 50.0, 
+            "macd_line": 0.0, "macd_signal": 0.0, "macd_hist": 0.0,
             "ema20": 0.0, "ema50": 0.0, "ema200": 0.0, "raw_closes": []
         }
 
@@ -295,6 +298,8 @@ async def fetch_aggregated_market_data(session, symbol, bar):
         "close": round(float(np.mean([d["close"] for d in valid_indicators])), decimals),
         "rsi": round(float(np.mean([d["rsi"] for d in valid_indicators])), 2),
         "stoch_k": round(float(np.mean([d["stoch_k"] for d in valid_indicators])), 2),
+        "macd_line": round(float(np.mean([d["macd_line"] for d in valid_indicators])), 4),
+        "macd_signal": round(float(np.mean([d["macd_signal"] for d in valid_indicators])), 4),
         "macd_hist": round(float(np.mean([d["macd_hist"] for d in valid_indicators])), 4),
         "ema20": round(float(np.mean([d["ema20"] for d in valid_indicators])), decimals),
         "ema50": round(float(np.mean([d["ema50"] for d in valid_indicators])), decimals),
@@ -303,13 +308,33 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. OPEN INTEREST & LIKWIDACJE Z BYBIT I OKX ---
+# --- 3. DYNAMICZNY SKAN TOP SELEKCJI OKX (EKSTREMA) ---
+async def fetch_okx_top_extremes(session):
+    symbols = ["SOL", "SUI", "ETH", "AVAX", "LINK", "ADA", "DOGE", "NEAR", "APT"]
+    results = []
+    for sym in symbols:
+        closes = await fetch_okx_candles(session, sym, "1d")
+        if closes and len(closes) >= 20:
+            rsi = HistoricalPatternEngine.calculate_rsi(closes)
+            results.append({
+                "symbol": sym,
+                "close": closes[-1],
+                "rsi": rsi,
+                "extreme_score": abs(rsi - 50)
+            })
+    results = sorted(results, key=lambda x: x["extreme_score"], reverse=True)
+    return results
+
+
+# --- 4. OPEN INTEREST, FUNDING RATES & LIKWIDACJE ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
         "open_interest_bybit": "Brak danych",
+        "funding_rate_okx": "0.01%",
+        "funding_rate_bybit": "0.01%",
         "liquidations_bybit": "Brak danych (stabilny przepływ)",
-        "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD"
+        "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
     
     # Open Interest OKX
@@ -335,6 +360,31 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI Bybit error: {e}")
 
+    # Funding Rate OKX
+    try:
+        url_fr_okx = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP"
+        async with session.get(url_fr_okx, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                if res.get("data"):
+                    fr = float(res['data'][0].get('fundingRate', 0)) * 100
+                    derivatives_info["funding_rate_okx"] = f"{fr:.4f}%"
+    except Exception as e:
+        print(f"Funding Rate OKX error: {e}")
+
+    # Funding Rate Bybit
+    try:
+        url_fr_bybit = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
+        async with session.get(url_fr_bybit, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                list_fr = res.get("result", {}).get("list", [])
+                if list_fr:
+                    fr = float(list_fr[0].get('fundingRate', 0)) * 100
+                    derivatives_info["funding_rate_bybit"] = f"{fr:.4f}%"
+    except Exception as e:
+        print(f"Funding Rate Bybit error: {e}")
+
     # Statystyki likwidacji z Bybit
     try:
         url_liq = "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=BTCUSDT&limit=50"
@@ -351,16 +401,16 @@ async def fetch_derivatives_and_liquidations(session):
     return derivatives_info
 
 
-# --- 4. GENEROWANIE RAPORTU PRZEZ GEMINI (gemini-3.8-flash) ---
-async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, max_retries=5, initial_delay=5):
+# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI ---
+async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_extremes, max_retries=3, initial_delay=4):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
 Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor.
-Przygotuj profesjonalną, pojedynczą wiadomość raportu handlowego uwzględniającą wyższe interwały (1h, 4h, 1D, 1W, 1M) z uśrednionych danych z giełd (OKX, Binance, Kraken, Bybit), wyliczone wzorce historyczne oraz dane o instrumentach pochodnych i likwidacjach.
+Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W, 1M) z uśrednionych danych z giełd (OKX, Binance, Kraken, Bybit), wyliczone wzorce historyczne oraz dane o instrumentach pochodnych i likwidacjach.
 
 BEZWZGLĘDNE ZASADY FORMATOWANIA TELEGRAMA:
-1. ŻADNEGO WSTĘPU. Wiadomość zaczyna się NATYCHMIAST od nagłówka BTC.
+1. ŻADNEGO WSTĘPU. Raport rozpoczyna się od analizy BTC.
 2. BEZWZGLĘDNY ZAKAZ PODAWANIA LICZB/WARTOŚCI WSKAŹNIKÓW w tekście (brak podawania konkretnych liczb RSI, MACD, StochRSI). Użytkownik odczytuje wartości sam z pliku HTML.
 3. AKTYWA TARGETOWE: BTC, STRK (Starknet) oraz S (Sonic / S/USDC). Uwaga: 'S' oznacza Sonic, nie pomył z Solaną (SOL).
 4. Przekaz ma być skondensowany, skupiony wyłącznie na strukturze, reżimie rynkowym, płynności oraz poziomach Long/Short z wielodniowym horyzontem trzymania pozycji (swing).
@@ -371,57 +421,52 @@ PRZETORZONE SYGNAŁY WZORCÓW HISTORYCZNYCH:
 DANE TECHNICZNE (UŚREDNIONE Z GIEŁD):
 {tech_summary}
 
+TOP SELEKCJA EKSTREMÓW OKX (DANE Z WYKRESU 1D):
+{okx_extremes}
+
 DANE POCHODNE I LIKWIDACJE:
 - Open Interest (OKX): {deriv_data['open_interest_okx']}
 - Open Interest (Bybit): {deriv_data['open_interest_bybit']}
+- Funding Rate (OKX): {deriv_data['funding_rate_okx']}
+- Funding Rate (Bybit): {deriv_data['funding_rate_bybit']}
 - Monitor Likwidacji / Presja (Bybit): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
-STRUKTURA WYJŚCIOWA (JEDNA WIADOMOŚĆ):
-
-### BTC
-[Zwięzła analiza strukturalna bez podawania liczb przy wskaźnikach]
-- Long: Przedział [X - Y] | Zasięg: [Cena]
-- Short: Przedział [X - Y] | Zasięg: [Cena] (wielodniowy swing)
-
-### STRK
-[Zwięzła analiza Starknet]
-- Long: Przedział [X - Y] | Zasięg: [Cena]
-- Short: Przedział [X - Y] | Zasięg: [Cena]
-
-### S (Sonic)
-[Zwięzła analiza Sonic]
-- Long: Przedział [X - Y] | Zasięg: [Cena]
-- Short: Przedział [X - Y] | Zasięg: [Cena]
-
-### TOP 3 SELEKCJA OKX
-1. **[Nazwa Altcoina]**: Wejście [Long/Short]: [X - Y] | TP: [Cena] | Safe Size: [Widełki]
-2. **[Nazwa Altcoina]**: Wejście [Long/Short]: [X - Y] | TP: [Cena] | Safe Size: [Widełki]
-3. **[Nazwa Altcoina]**: Wejście [Long/Short]: [X - Y] | TP: [Cena] | Safe Size: [Widełki]
+PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
+Część 1: Kondycja Rynku, BTC, STRK (Starknet), S (Sonic).
+Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
-    delay = initial_delay
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt
-            )
-            if response and response.text:
-                return response.text.strip()
-        except APIError as e:
-            print(f"Ostrzeżenie: Błąd API Gemini (próba {attempt}/{max_retries}): {e}")
-        except Exception as e:
-            print(f"Próba {attempt}/{max_retries} nieudana: {e}")
-            
-        if attempt < max_retries:
-            await asyncio.sleep(delay)
-            delay *= 2
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    
+    for model_name in candidate_models:
+        delay = initial_delay
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"Wywoływanie Gemini z modelem: {model_name} (próba {attempt})")
+                response = client.models.generate_content(
+                    model=model_name,
+                    contents=prompt
+                )
+                if response and response.text:
+                    text = response.text.strip()
+                    parts = text.split("Top Selekcja")
+                    part1 = parts[0].strip()
+                    part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Altcoinowa z OKX: Brak dodatkowych wskazań."
+                    return part1, part2
+            except APIError as e:
+                print(f"Ostrzeżenie API Gemini {model_name} ({attempt}/{max_retries}): {e}")
+            except Exception as e:
+                print(f"Błąd wywołania {model_name} ({attempt}/{max_retries}): {e}")
+                
+            if attempt < max_retries:
+                await asyncio.sleep(delay)
+                delay *= 2
 
-    return "Błąd generowania analizy (przeciążenie API Gemini)."
+    return "Błąd generowania analizy (przeciążenie API Gemini).", "Spróbuj ponownie później."
 
 
-# --- 5. WYSYŁKA NA TELEGRAM ---
+# --- 6. WYSYŁKA NA TELEGRAM ---
 async def send_telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Brak danych konfiguracyjnych Telegrama.")
@@ -435,7 +480,7 @@ async def send_telegram(text):
             return res_text
 
 
-# --- 6. WYSYŁKA HTML NA FTP ---
+# --- 7. WYSYŁKA HTML NA FTP ---
 def upload_html_to_ftp(html_content):
     if not FTP_USER or not FTP_PASS:
         print("Brak danych logowania do FTP.")
@@ -457,12 +502,12 @@ def upload_html_to_ftp(html_content):
                 
             with open("index.html", "rb") as f:
                 ftp.storbinary("STOR index.html", f)
-            print("Pomyślnie wysłano plik index.html na FTP (piwecki.pl/analiza).")
+            print("Pomyślnie wysłano pełny plik index.html na FTP (piwecki.pl/analiza).")
     except Exception as e:
         print(f"Błąd przesyłania FTP: {e}")
 
 
-# --- 7. GŁÓWNA PĘTLA PROGRAMU ---
+# --- 8. GŁÓWNA PĘTLA PROGRAMU ---
 async def main():
     async with aiohttp.ClientSession() as session:
         intervals = ["1h", "4h", "1d", "1w", "1M"]
@@ -483,84 +528,174 @@ async def main():
             pattern_evaluations[sym] = HistoricalPatternEngine.evaluate_asset_patterns(timeframes_raw)
             
         deriv_data = await fetch_derivatives_and_liquidations(session)
+        okx_extremes = await fetch_okx_top_extremes(session)
         
         tech_summary = ""
         pattern_summary = ""
         
         for sym in symbols:
             tech_summary += f"\n{sym} Wyższe Interwały (OKX/Binance/Kraken/Bybit):\n"
-            for bar in ["1h", "4h", "1d", "1w"]:
+            for bar in ["1h", "4h", "1d", "1w", "1M"]:
                 d = market_data[sym][bar]
-                tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}\n"
+                tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Line: {d['macd_line']}, Signal: {d['macd_signal']}, Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}, EMA200: ${d['ema200']}\n"
             
             pat = pattern_evaluations[sym]
             pattern_summary += f"- {sym}: Reżim: {pat.get('regime')}, Sygnał Wzorca: {pat.get('pattern_signal')}, Notatki: {pat.get('notes')}\n"
 
-        # 1. Generujemy analizę AI za pomocą gemini-3.8-flash
-        ai_report = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary)
+        okx_summary = "Skanowanie OKX Ekstremów 1D:\n"
+        for item in okx_extremes[:3]:
+            okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI: {item['rsi']}\n"
+
+        # 1. Generujemy analizę AI za pomocą Gemini na Telegram
+        part1, part2 = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_summary)
         
-        # 2. Wysyłamy jedną skondensowaną wiadomość na Telegram
-        await send_telegram(ai_report)
+        # 2. Wysyłamy dwie wiadomości na Telegram
+        await send_telegram(part1)
+        await asyncio.sleep(1)
+        await send_telegram(part2)
         
-        # 3. Budujemy tabele HTML dla wszystkich aktywów
+        # 3. Budujemy bogate tabele HTML zawierające WSZYSTKIE pobrane dane ze wszystkich giełd
         html_boxes = ""
         for sym in symbols:
             rows = ""
-            for bar in ["1h", "4h", "1d", "1w"]:
+            for bar in ["1h", "4h", "1d", "1w", "1M"]:
                 d = market_data[sym][bar]
-                rows += f'<div class="data-row"><b>{bar.upper()}:</b> Zamknięcie: ${d["close"]} | RSI: {d["rsi"]} | StochRSI K: {d["stoch_k"]} | MACD Hist: {d["macd_hist"]} | EMA20: ${d["ema20"]} | EMA50: ${d["ema50"]}</div>\n'
+                rows += f'''
+                <tr>
+                    <td><b>{bar.upper()}</b></td>
+                    <td>${d["close"]}</td>
+                    <td>{d["rsi"]}</td>
+                    <td>{d["stoch_k"]}</td>
+                    <td>{d["macd_line"]} / {d["macd_signal"]} ({d["macd_hist"]})</td>
+                    <td>${d["ema20"]}</td>
+                    <td>${d["ema50"]}</td>
+                    <td>${d["ema200"]}</td>
+                </tr>
+                '''
             
             pat = pattern_evaluations[sym]
             html_boxes += f"""
-            <div class="tech-box">
-                <h3>{sym} (Wzorce: {pat.get('pattern_signal')})</h3>
-                <div class="data-row"><i>{pat.get('notes')}</i></div>
-                {rows}
+            <div class="tech-card">
+                <h3>{sym} — Sygnał Wzorca: <span class="badge">{pat.get('pattern_signal')}</span></h3>
+                <p class="notes"><b>Diagnoza Wzorców Historycznych:</b> {pat.get('notes')}</p>
+                <p class="notes"><b>Dywergencje RSI:</b> 1W: {pat.get('divergences', {}).get('1w')}, 1D: {pat.get('divergences', {}).get('1d')}, 4H: {pat.get('divergences', {}).get('4h')}</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Interwał</th>
+                            <th>Cena Zamknięcia</th>
+                            <th>RSI (14)</th>
+                            <th>StochRSI K</th>
+                            <th>MACD (Line / Signal / Hist)</th>
+                            <th>EMA 20</th>
+                            <th>EMA 50</th>
+                            <th>EMA 200</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows}
+                    </tbody>
+                </table>
             </div>
             """
+
+        okx_box_rows = ""
+        for item in okx_extremes:
+            okx_box_rows += f'''
+            <tr>
+                <td><b>{item["symbol"]}</b></td>
+                <td>${item["close"]}</td>
+                <td>{item["rsi"]}</td>
+                <td>{item["extreme_score"]:.2f}</td>
+            </tr>
+            '''
 
         html_content = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Maker Monitor - Raport Analityczny</title>
+    <title>Market Maker Monitor — Repozytorium Analityczne</title>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, sans-serif; background-color: #121214; color: #e1e1e6; margin: 0; padding: 20px; }}
-        .container {{ max-width: 900px; margin: 0 auto; background: #202024; padding: 25px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.6); }}
-        h1 {{ color: #00b37e; border-bottom: 2px solid #29292e; padding-bottom: 10px; }}
-        h2 {{ color: #61dafb; margin-top: 25px; border-bottom: 1px solid #29292e; padding-bottom: 5px; }}
-        h3 {{ color: #fba94c; margin-top: 15px; }}
-        pre {{ background: #121214; padding: 15px; border-radius: 5px; white-space: pre-wrap; word-wrap: break-word; color: #c4c4cc; line-height: 1.5; }}
-        .tech-box {{ background: #18181b; padding: 15px; border-radius: 6px; margin-top: 15px; border-left: 4px solid #00b37e; }}
-        .data-row {{ font-family: monospace; font-size: 0.95em; color: #00e676; margin: 6px 0; }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f1115; color: #e1e1e6; margin: 0; padding: 25px; line-height: 1.6; }}
+        .container {{ max-width: 1100px; margin: 0 auto; background: #16181d; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
+        h1 {{ color: #00e676; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
+        h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
+        h3 {{ color: #ffab40; margin-top: 20px; }}
+        pre {{ background: #0f1115; padding: 18px; border-radius: 8px; white-space: pre-wrap; word-wrap: break-word; color: #d0d4dc; font-size: 0.95em; border: 1px solid #232730; }}
+        .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #00e676; }}
+        .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
+        .badge {{ background: #232730; color: #00e676; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88em; }}
+        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2e39; }}
+        th {{ background-color: #0f1115; color: #8892b0; font-weight: 600; }}
+        tr:hover {{ background-color: #232730; }}
+        .deriv-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; margin-top: 15px; }}
+        .deriv-card {{ background: #1a1d24; padding: 15px; border-radius: 6px; border: 1px solid #232730; }}
+        .deriv-card span {{ display: block; font-size: 0.8em; color: #8892b0; }}
+        .deriv-card strong {{ font-size: 1.1em; color: #00e676; }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Market Maker Monitor - Live Report</h1>
-        <p>Ostatnia aktualizacja: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
+        <h1>Market Maker Monitor — Live Analytical Database</h1>
+        <p>Data aktualizacji: <b>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</b></p>
         
-        <h2>Syntetyczna Analiza Rynku & Rekomendacje AI</h2>
-        <pre>{ai_report}</pre>
+        <h2>1. Raport Syntetyczny (Opracowanie AI Gemini)</h2>
+        <h3>Część I: Kondycja Rynku, BTC, STRK, Sonic (S)</h3>
+        <pre>{part1}</pre>
 
-        <h2>Dane On-Chain, Pochodne i Likwidacje</h2>
-        <div class="tech-box">
-            <div class="data-row"><b>Open Interest (OKX):</b> {deriv_data['open_interest_okx']}</div>
-            <div class="data-row"><b>Open Interest (Bybit):</b> {deriv_data['open_interest_bybit']}</div>
-            <div class="data-row"><b>Presja Likwidacyjna (Bybit):</b> {deriv_data['liquidations_bybit']}</div>
-            <div class="data-row"><b>Realized Price / Strefy Bazy Kosztowej:</b> {deriv_data['realized_price']}</div>
+        <h3>Część II: Top Selekcja Altcoinowa</h3>
+        <pre>{part2}</pre>
+
+        <h2>2. Rynek Pochodnych, Funding Rates & Baza Kosztowa On-Chain</h2>
+        <div class="deriv-grid">
+            <div class="deriv-card">
+                <span>Open Interest (OKX)</span>
+                <strong>{deriv_data['open_interest_okx']}</strong>
+            </div>
+            <div class="deriv-card">
+                <span>Open Interest (Bybit)</span>
+                <strong>{deriv_data['open_interest_bybit']}</strong>
+            </div>
+            <div class="deriv-card">
+                <span>Funding Rate (OKX)</span>
+                <strong>{deriv_data['funding_rate_okx']}</strong>
+            </div>
+            <div class="deriv-card">
+                <span>Funding Rate (Bybit)</span>
+                <strong>{deriv_data['funding_rate_bybit']}</strong>
+            </div>
+        </div>
+        <div class="tech-card" style="border-left-color: #40c4ff;">
+            <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit):</b> {deriv_data['liquidations_bybit']}</p>
+            <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
 
-        <h2>Dane Techniczne i Wskaźniki Uśrednione (1h, 4h, 1D, 1W) [OKX, Binance, Kraken, Bybit]</h2>
+        <h2>3. Skan Ekstremów Płynnościowych OKX (Akapit 1D)</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Cena ($)</th>
+                    <th>RSI (1D)</th>
+                    <th>Wskaźnik Odchylenia (Extreme Score)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {okx_box_rows}
+            </tbody>
+        </table>
+
+        <h2>4. Pełne Zestawienie Wskaźników Technicznych z 4 Giełd (OKX, Binance, Kraken, Bybit)</h2>
         {html_boxes}
     </div>
 </body>
 </html>
 """
-        # 4. Wysłanie pliku HTML na FTP (piwecki.pl/analiza)
+        # 4. Wysłanie kompletnego pliku HTML na FTP
         upload_html_to_ftp(html_content)
-        print("Proces zakończony pomyślnie.")
+        print("Proces zakończony pomyślnie. Plik HTML zapisany ze wszystkimi danymi ze wszystkich giełd.")
 
 if __name__ == "__main__":
     asyncio.run(main())
