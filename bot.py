@@ -9,21 +9,8 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# --- POMOCNIK: KONWERSJA TYPÓW NUMPY DO JSON (KOMPATYBILNY Z NUMPY 2.0+) ---
-def clean_for_json(obj):
-    """Rekurencyjnie konwertuje typy numpy na standardowe typy Pythona dla bezpiecznego JSON."""
-    if isinstance(obj, dict):
-        return {str(k): clean_for_json(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [clean_for_json(v) for v in obj]
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, np.integer):
-        return int(obj)
-    return obj
-
-# --- 1. SILNIK ANALIZY TECHNICZNEJ (Logika Claude + AN-1) ---
-class TechnicalEngine:
+# --- 1. SILNIK ANALIZY TECHNICZNEJ I WZORCÓW HISTORYCZNYCH (Top-Down + Dywergencje + EMA200 Regime) ---
+class HistoricalPatternEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
         if len(prices) < period + 1:
@@ -56,80 +43,85 @@ class TechnicalEngine:
         return round(float(ema[-1]), 5)
 
     @staticmethod
-    def calculate_macd(prices, fast=12, slow=26, signal=9):
-        if len(prices) < slow + signal:
-            return {"macd": 0.0, "signal": 0.0, "hist": 0.0}
-        prices = np.array(prices)
-        
-        def ema_arr(data, p):
-            alpha = 2 / (p + 1)
-            res = [data[0]]
-            for val in data[1:]:
-                res.append(val * alpha + res[-1] * (1 - alpha))
-            return np.array(res)
-
-        ema_fast = ema_arr(prices, fast)
-        ema_slow = ema_arr(prices, slow)
-        macd_line = ema_fast - ema_slow
-        signal_line = ema_arr(macd_line, signal)
-        histogram = macd_line - signal_line
-        
-        return {
-            "macd": round(float(macd_line[-1]), 5),
-            "signal": round(float(signal_line[-1]), 5),
-            "hist": round(float(histogram[-1]), 5)
-        }
-
-    @staticmethod
-    def calculate_stoch_rsi(prices, rsi_period=14, stoch_period=14):
+    def detect_multi_timeframe_divergence(prices):
+        """Wykrywanie dywergencji (Cena vs RSI) dla wzorców historycznych."""
+        if len(prices) < 30:
+            return "BRAK"
+        p = np.array(prices)
         rsi_series = []
-        for i in range(rsi_period, len(prices) + 1):
-            sub_prices = prices[:i]
-            rsi_val = TechnicalEngine.calculate_rsi(sub_prices, rsi_period)
-            rsi_series.append(rsi_val)
-            
-        if len(rsi_series) < stoch_period:
-            return {"k": 50.0}
-            
-        rsi_slice = rsi_series[-stoch_period:]
-        min_rsi = min(rsi_slice)
-        max_rsi = max(rsi_slice)
+        for i in range(14, len(p) + 1):
+            rsi_series.append(HistoricalPatternEngine.calculate_rsi(p[:i], 14))
         
-        if max_rsi == min_rsi:
-            stoch_rsi = 100.0
-        else:
-            stoch_rsi = ((rsi_series[-1] - min_rsi) / (max_rsi - min_rsi)) * 100
+        if len(rsi_series) < 15:
+            return "BRAK"
             
-        return {"k": round(float(stoch_rsi), 2)}
+        recent_prices = p[-15:]
+        recent_rsi = np.array(rsi_series[-15:])
+        
+        p_min1_idx = np.argmin(recent_prices[:7])
+        p_min2_idx = 7 + np.argmin(recent_prices[7:])
+        if recent_prices[p_min2_idx] < recent_prices[p_min1_idx] and recent_rsi[p_min2_idx] > recent_rsi[p_min1_idx]:
+            return "BYCZA_DYWERGENCJA"
+            
+        p_max1_idx = np.argmax(recent_prices[:7])
+        p_max2_idx = 7 + np.argmax(recent_prices[7:])
+        if recent_prices[p_max2_idx] > recent_prices[p_max1_idx] and recent_rsi[p_max2_idx] < recent_rsi[p_max1_idx]:
+            return "NIEDŹWIEDZIA_DYWERGENCJA"
+            
+        return "BRAK"
 
-    @staticmethod
-    def analyze_structure_and_signals(closes):
-        """Zaawansowana logika do wyznaczania prawdopodobnych punktów wejścia Long/Short."""
-        if not closes or len(closes) < 50:
-            return {"status": "Brak danych", "signal": "NEUTRAL"}
-        c = np.array(closes)
-        close_price = c[-1]
-        ema20 = TechnicalEngine.calculate_ema(c, 20)
-        ema50 = TechnicalEngine.calculate_ema(c, 50)
-        rsi = TechnicalEngine.calculate_rsi(c)
-        macd = TechnicalEngine.calculate_macd(c)
-        stoch = TechnicalEngine.calculate_stoch_rsi(c)
+    @classmethod
+    def evaluate_asset_patterns(cls, timeframes_data):
+        """
+        Analiza Top-Down (1W -> 1D -> 4H -> 1H):
+        - Sprawdzenie reżimu rynku na 1D (Cena vs EMA200 -> Hossa / Bessa).
+        - Weryfikacja dywergencji i struktur na wyższych i niższych interwałach.
+        """
+        c_1w = timeframes_data.get("1w", [])
+        c_1d = timeframes_data.get("1d", [])
+        c_4h = timeframes_data.get("4h", [])
+        c_1h = timeframes_data.get("1h", [])
         
-        signal_bias = "NEUTRAL"
-        if rsi < 35 and stoch["k"] < 20 and close_price > ema50 * 0.95:
-            signal_bias = "POTENTIAL_LONG"
-        elif rsi > 65 and stoch["k"] > 80:
-            signal_bias = "POTENTIAL_SHORT"
+        if not c_1d or len(c_1d) < 200:
+            return {"pattern_signal": "NEUTRAL", "regime": "UNKNOWN", "notes": "Niewystarczająca historia danych"}
+            
+        close_price = c_1d[-1]
+        ema200_1d = cls.calculate_ema(c_1d, 200)
+        
+        # Określenie reżimu makro: Hossa (powyżej EMA200) vs Bessa (poniżej EMA200)
+        regime = "HOSSA (Bullish Regime)" if close_price > ema200_1d else "BESSA (Bearish Regime)"
+        
+        div_1w = cls.detect_multi_timeframe_divergence(c_1w)
+        div_1d = cls.detect_multi_timeframe_divergence(c_1d)
+        div_4h = cls.detect_multi_timeframe_divergence(c_4h)
+        
+        rsi_1h = cls.calculate_rsi(c_1h) if c_1h else 50.0
+        rsi_4h = cls.calculate_rsi(c_4h) if c_4h else 50.0
+        
+        # Wzorzec historyczny oparty o kontekst top-down i dywergencje
+        pattern_signal = "NEUTRAL"
+        notes = f"Reżim: {regime}. Dywergencje -> 1W: {div_1w}, 1D: {div_1d}, 4H: {div_4h}."
+        
+        if regime.startswith("HOSSA"):
+            if div_1w == "BYCZA_DYWERGENCJA" or div_1d == "BYCZA_DYWERGENCJA" or rsi_4h < 35:
+                pattern_signal = "POTENTIAL_LONG_SETUP"
+                notes += " Wzorzec historyczny wskazuje na silne wsparcie w trendzie wzrostowym (dip buying)."
+            elif div_1d == "NIEDŹWIEDZIA_DYWERGENCJA" and rsi_1h > 70:
+                pattern_signal = "POTENTIAL_SHORT_CORRECTION"
+                notes += " Ostrzeżenie o lokalnym przegrzaniu w hossie."
+        else: # Bessa
+            if div_1d == "NIEDŹWIEDZIA_DYWERGENCJA" or rsi_4h > 65:
+                pattern_signal = "POTENTIAL_SHORT_SETUP"
+                notes += " Wzorzec historyczny wskazuje na odbicie do oporu w trendzie spadkowym (sell the rip)."
+            elif div_1w == "BYCZA_DYWERGENCJA":
+                pattern_signal = "POTENTIAL_MACRO_BOTTOM_WATCH"
+                notes += " Sygnał wstępny budowania makro dna w bessie."
 
         return {
-            "close": close_price,
-            "rsi": rsi,
-            "macd_hist": macd["hist"],
-            "stoch_k": stoch["k"],
-            "ema20": ema20,
-            "ema50": ema50,
-            "signal_bias": signal_bias,
-            "dist_ema20_pct": round(((close_price / ema20) - 1) * 100, 2)
+            "pattern_signal": pattern_signal,
+            "regime": regime,
+            "divergences": {"1w": div_1w, "1d": div_1d, "4h": div_4h},
+            "notes": notes
         }
 
 
@@ -137,7 +129,7 @@ class TechnicalEngine:
 def fetch_okx_candles(symbol, bar):
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W"}
     inst_id = f"{symbol}-USDT-SWAP" if "USDT" not in symbol else symbol
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar_map.get(bar, '1H')}&limit=100"
+    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar_map.get(bar, '1H')}&limit=250"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -151,7 +143,7 @@ def fetch_okx_candles(symbol, bar):
 def fetch_binance_candles(symbol, bar):
     bar_map = {"1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w"}
     bn_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
-    url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bar_map.get(bar, '1h')}&limit=100"
+    url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bar_map.get(bar, '1h')}&limit=250"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -173,7 +165,7 @@ def fetch_kraken_candles(symbol, bar):
             result = data.get("result", {})
             for k, v in result.items():
                 if k != "last":
-                    return [float(c[4]) for c in v[-100:]]
+                    return [float(c[4]) for c in v[-250:]]
     except Exception as e:
         print(f"Kraken Error ({symbol} {bar}): {e}")
     return None
@@ -181,7 +173,7 @@ def fetch_kraken_candles(symbol, bar):
 def fetch_bybit_candles(symbol, bar):
     bar_map = {"1h": "60", "4h": "240", "1d": "D", "1w": "W"}
     by_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
-    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={by_symbol}&interval={bar_map.get(bar, '60')}&limit=100"
+    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={by_symbol}&interval={bar_map.get(bar, '60')}&limit=250"
     try:
         resp = requests.get(url, timeout=10)
         if resp.status_code == 200:
@@ -194,7 +186,7 @@ def fetch_bybit_candles(symbol, bar):
     return None
 
 
-# --- 3. POBIERANIE POCHODNYCH (Open Interest, Funding, Likwidacje) ---
+# --- 3. POBIERANIE POCHODNYCH I ON-CHAIN ---
 def fetch_derivatives_data(symbol):
     derivatives = {"okx_oi": 0.0, "bybit_oi": 0.0, "funding_rate": 0.0, "liquidations_summary": "Brak anomalii"}
     try:
@@ -237,45 +229,67 @@ def fetch_derivatives_data(symbol):
     return derivatives
 
 
-# --- 4. KONTEKST MAKROEKONOMICZNY (USA / FED) ORAZ SENTYMENT FORUM ---
+# --- 4. KONTEKST MAKROEKONOMICZNY I SENTYMENT ---
 def fetch_macro_and_sentiment_context():
+    onchain_info = "Brak danych on-chain"
+    try:
+        resp = requests.get("https://blockchain.info/stats?format=json", timeout=5)
+        if resp.status_code == 200:
+            bc_data = resp.json()
+            onchain_info = f"Market Price USD: {bc_data.get('market_price_usd')}, Hashrate: {bc_data.get('hash_rate')}"
+    except Exception as e:
+        print(f"Blockchain.info Error: {e}")
+
     sentiment_data = {
-        "forum_sentiment": "Mieszany/Neutralny z przewagą ostrożności w mediach społecznościowych",
-        "fed_context": "Bieżąca polityka monetarna FED: uwaga skupiona na danych o inflacji oraz płynności w sektorze bankowym/repo",
-        "macro_tone": "Oczekiwanie na klarowne sygnały z rynków tradycyjnych (US Treasuries, DXY)"
+        "forum_sentiment": "Mieszany/Neutralny z rosnącą ostrożnością w kluczowych strefach popytowych",
+        "fed_context": "Polityka FED: fokus na płynność repo i odczyty inflacyjne",
+        "onchain_cost_basis": "Szacunkowa baza kosztowa ETF: ~81.5k USD | True Market Mean: ~77.5k USD | STH Cost Basis: ~74.6k USD",
+        "blockchain_stats": onchain_info
     }
     return sentiment_data
 
 
-def get_aggregated_analysis(symbol, bar):
-    sources = [
-        fetch_okx_candles(symbol, bar),
-        fetch_binance_candles(symbol, bar),
-        fetch_kraken_candles(symbol, bar),
-        fetch_bybit_candles(symbol, bar)
-    ]
+def get_aggregated_analysis(symbol):
+    intervals = ["1h", "4h", "1d", "1w"]
+    timeframes_candles = {}
+    metrics_summary = {}
+
+    for bar in intervals:
+        sources = [
+            fetch_okx_candles(symbol, bar),
+            fetch_binance_candles(symbol, bar),
+            fetch_kraken_candles(symbol, bar),
+            fetch_bybit_candles(symbol, bar)
+        ]
+        
+        valid_closes = [closes for closes in sources if isinstance(closes, list) and len(closes) >= 20]
+        if valid_closes:
+            # Używamy najdłuższej dostępnej tablicy świec dla danego interwału
+            best_closes = max(valid_closes, key=len)
+            timeframes_candles[bar] = best_closes
+            
+            c = np.array(best_closes)
+            close_price = float(c[-1])
+            ema20 = HistoricalPatternEngine.calculate_ema(c, 20)
+            rsi = HistoricalPatternEngine.calculate_rsi(c)
+            macd = HistoricalPatternEngine.calculate_macd(c)
+            
+            metrics_summary[bar] = {
+                "close": close_price,
+                "rsi": rsi,
+                "macd_hist": macd["hist"],
+                "ema20": ema20
+            }
+        else:
+            timeframes_candles[bar] = []
+            metrics_summary[bar] = {"close": 0.0, "rsi": 50.0, "macd_hist": 0.0, "ema20": 0.0}
+
+    # Uruchomienie silnika wzorców historycznych (Top-Down + Regim 1D EMA200 + Dywergencje)
+    pattern_evaluation = HistoricalPatternEngine.evaluate_asset_patterns(timeframes_candles)
     
-    valid_analyses = []
-    for closes in sources:
-        if isinstance(closes, list) and len(closes) >= 20:
-            analysis = TechnicalEngine.analyze_structure_and_signals(closes)
-            valid_analyses.append(analysis)
-
-    if not valid_analyses:
-        return {"close": 0.0, "rsi": 50.0, "signal_bias": "NEUTRAL"}
-
-    avg_close = round(float(np.mean([a["close"] for a in valid_analyses])), 4 if symbol in ["STRK", "SUI"] else 2)
-    avg_rsi = round(float(np.mean([a["rsi"] for a in valid_analyses])), 2)
-    avg_macd_hist = round(float(np.mean([a["macd_hist"] for a in valid_analyses])), 4)
-    avg_stoch_k = round(float(np.mean([a["stoch_k"] for a in valid_analyses])), 2)
-    avg_ema20 = round(float(np.mean([a["ema20"] for a in valid_analyses])), 4 if symbol in ["STRK", "SUI"] else 2)
-
     return {
-        "close": avg_close,
-        "rsi": avg_rsi,
-        "macd_hist": avg_macd_hist,
-        "stoch_k": avg_stoch_k,
-        "ema20": avg_ema20
+        "metrics": metrics_summary,
+        "historical_patterns": pattern_evaluation
     }
 
 
@@ -284,12 +298,12 @@ def get_okx_top_extremes():
     results = []
     for sym in symbols:
         c_1d = fetch_okx_candles(sym, "1d")
-        if c_1d and len(c_1d) >= 20:
-            analysis = TechnicalEngine.analyze_structure_and_signals(c_1d)
+        if c_1d and len(c_1d) >= 50:
+            rsi = HistoricalPatternEngine.calculate_rsi(c_1d)
             results.append({
                 "symbol": sym,
-                "analysis": analysis,
-                "extreme_score": abs(analysis["rsi"] - 50)
+                "rsi": rsi,
+                "extreme_score": abs(rsi - 50)
             })
     results = sorted(results, key=lambda x: x["extreme_score"], reverse=True)
     return results[:3]
@@ -299,58 +313,53 @@ def get_okx_top_extremes():
 def generate_ai_report(market_data, derivatives_data, macro_sentiment):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     
-    clean_market = clean_for_json(market_data)
-    clean_deriv = clean_for_json(derivatives_data)
-    clean_macro = clean_for_json(macro_sentiment)
-    
     prompt = f"""
 Jesteś wybitnym analitykiem rynków kryptowalut. Masz do dyspozycji:
-1. Surowe dane i uśrednione wskaźniki multi-exchange (OKX, Binance, Kraken, Bybit).
-2. Zaawansowane sygnały analizy technicznej (wzorce Claude, struktury, stany RSI/MACD/EMA).
-3. Dane pochodne (Open Interest, Funding Rate, Likwidacje).
-4. Kontekst makroekonomiczny z USA (FED) oraz sentyment z forów finansowych w internecie.
+1. Zbiorcze wskaźniki techniczne multi-exchange oraz **wstępne sygnały z algorytmicznego silnika wzorców historycznych** (ocena reżimu Hossa/Bessa względem 1D EMA200, analizy top-down 1W-1D-4H-1H oraz wykryte dywergencje).
+2. Dane pochodne (Open Interest, Funding Rate, Likwidacje).
+3. Dane on-chain i makro (baza kosztowa ETF, True Market Mean, polityka FED).
 
-Przeprowadź głęboką syntezę uwzględniającą wszystkie te warstwy i przygotuj raport taktyczny na Telegrama.
+Twoim zadaniem jest przeprowadzenie krytycznej syntezy tych danych. Przeanalizuj, czy sygnały wygenerowane przez silnik wzorców historycznych są spójne z płynnością, OI, likwidacjami i makro, czy też wymagają korekty. Wyciągnij ostateczne wnioski taktyczne na Telegrama.
 
 BEZWZGLĘDNE ZASADY FORMATOWANIA TELEGRAMA:
 1. ŻADNEGO WSTĘPU. Wiadomość zaczyna się NATYCHMIAST od nagłówka BTC.
-2. **MONITORING CYKLU (SZCZYT HOSSY / DNO BESSY):** Przeanalizuj dane pod kątem osiągnięcia makro-szczytu hossy lub makro-dna bessy na Bitcoinie. JEŚLI wykryjesz historyczne ekstremum cyklu, MUSISZ umieścić na samej górze sekcji BTC potężny, wytłuszczony komunikat alarmowy: `🚨 **ALERT CYKLICZNY: [SZCZYT HOSSY / DNO BESSY] NA BTC!** 🚨`. Jeśli to nie ten moment, pomiń alert i zacznij bezpośrednio od nagłówka BTC.
-3. ŻADNYCH WSPOMNIEŃ O WARTOŚCIACH WSKAŹNIKÓW (zakazuje się podawania liczb typu RSI, MACD, StochRSI w tekście – użytkownik czyta je sam z wykresów). Skup się wyłącznie na strukturze ceny, psychologii, płynności, OI, likwidacjach, sentymentzie z forów oraz wpływie polityki FED/makro.
-4. Dla każdego głównego aktywa podaj precyzyjne poziomy dla pozycji Long oraz Short wraz z szacowanym wielodniowym horyzontem trzymania pozycji do opcjonalnego wyczerpania trendu/spadków.
+2. **MONITORING CYKLU (SZCZYT HOSSY / DNO BESSY / LOKALNE DNA):** Przeanalizuj dane pod kątem ekstremów cyklu i dywerencji. JEŚLI wykryjesz historyczne ekstremum, umieść na samej górze sekcji BTC komunikat: `🚨 **ALERT CYKLICZNY: [SZCZYT HOSSY / DNO BESSY] NA BTC!** 🚨`. Jeśli nie, zacznij bezpośrednio od nagłówka BTC.
+3. ŻADNYCH WSPOMNIEŃ O WARTOŚCIACH WSKAŹNIKÓW w tekście (zakaz podawania liczb RSI, MACD – użytkownik czyta je sam z wykresów). Skup się wyłącznie na strukturze ceny, dywergencjach, reżimie rynku, płynności, OI, likwidacjach i sentymentzie.
+4. Dla każdego głównego aktywa podaj precyzyjne poziomy dla pozycji Long oraz Short wraz z szacowanym wielodniowym horyzontem trzymania pozycji.
 
 STRUKTURA RAPORTU:
 
 ### BTC
-[Jeżeli występuje ekstremum cyklu, wstaw alert, a następnie 3 zdania precyzyjnie opisujące sytuację z uwzględnieniem makro FED, sentymentu i struktury].
+[Precyzyjny opis sytuacji z uwzględnieniem wniosków z silnika historycznych wzorców, reżimu rynku, bazy kosztowej on-chain i makro].
 Przeanalizowane poziomy:
 - Long: Przedział cenowy [X - Y] | Zasięg/TP (zamknięcie): [Cena]
 - Short: Przedział cenowy [X - Y] | Zasięg/TP (zamknięcie, horyzont wielodniowy): [Cena]
 
 ### STRK
-[3 zdania opisu w kontekście kondycji rynku, BTC, sentymentu i danych pochodnych, bez powtarzania danych o BTC].
+[Opis w kontekście kondycji rynku, BTC, sentymentu i danych pochodnych].
 Przeanalizowane poziomy:
 - Long: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
-- Short: Przedział cenowy [X - Y] | Zasięg/TP (wielodniowy short do wyczerpania spadków): [Cena]
+- Short: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
 
 ### S (Solana)
-[3 zdania opisu w kontekście makro i technicznym].
+[Opis w kontekście makro i technicznym].
 Przeanalizowane poziomy:
 - Long: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
 - Short: Przedział cenowy [X - Y] | Zasięg/TP: [Cena]
 
 ### TOP 3 OKX (Ekstremalne Okazje 1W/1D)
 Wybierz 3 projekty z OKX o największym ekstremum strukturalnym:
-1. **[Nazwa Altcoina]**: [Krótki kontekst techniczny, sentymentu i płynności].
+1. **[Nazwa Altcoina]**: [Krótki kontekst].
    - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
 2. **[Nazwa Altcoina]**: [Krótki kontekst].
    - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
 3. **[Nazwa Altcoina]**: [Krótki kontekst].
    - Wejście [Long/Short]: Przedział [X - Y] | Zasięg: [Cena]
 
-Dane analityczne, makro i sentyment:
-{clean_market}
-{clean_deriv}
-{clean_macro}
+Dane analityczne, wzorce historyczne i dywergencje:
+{market_data}
+{derivatives_data}
+{macro_sentiment}
 """
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
@@ -361,21 +370,9 @@ Dane analityczne, makro i sentyment:
     for attempt in range(max_retries):
         try:
             resp = requests.post(url, json=payload, timeout=45)
-            print(f"Gemini API Status Code: {resp.status_code}")
-            
             if resp.status_code == 200:
                 res_json = resp.json()
-                if "candidates" in res_json and len(res_json["candidates"]) > 0:
-                    candidate = res_json["candidates"][0]
-                    if "content" in candidate and "parts" in candidate["content"]:
-                        return candidate["content"]["parts"][0]["text"]
-                    else:
-                        print(f"Ostrzeżenie Gemini (brak content/parts): {candidate}")
-                        return f"Błąd AI: Odpowiedź zablokowana lub pusta."
-                else:
-                    print(f"Ostrzeżenie Gemini (brak candidates): {res_json}")
-                    return "Błąd AI: Brak kandydatów w odpowiedzi."
-                    
+                return res_json["candidates"][0]["content"]["parts"][0]["text"]
             elif resp.status_code in [429, 503]:
                 sleep_time = backoff_factor ** attempt
                 print(f"API błąd {resp.status_code}. Ponawianie za {sleep_time}s...")
@@ -384,7 +381,7 @@ Dane analityczne, makro i sentyment:
                 print(f"Gemini API Error: {resp.status_code} - {resp.text}")
                 break
         except Exception as e:
-            print(f"SZCZEGÓŁOWY BŁĄD podczas łączenia z Gemini (próba {attempt+1}): {e}")
+            print(f"Wyjątek podczas łączenia z Gemini: {e}")
             time.sleep(2 ** attempt)
             
     return "Błąd generowania raportu przez AI."
@@ -410,35 +407,34 @@ def generate_html_report(aggregated_data, derivatives_data, macro_sentiment, top
     <h1>RAW MARKET, MACRO & DERIVATIVES REPOSITORY</h1>
     <p>Ostatnia aktualizacja: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</p>
     
-    <h2>1. Kontekst Makro (USA/FED) i Sentyment z Forów</h2>
+    <h2>1. Kontekst Makro, On-Chain & Sentyment</h2>
     <div class="raw-data">
         {str(macro_sentiment)}
     </div>
 
-    <h2>2. Zbiorcze wskaźniki techniczne (Multi-Exchange)</h2>
+    <h2>2. Sygnały Algorytmiczne Wzorców Historycznych i Wskaźniki Multi-Exchange</h2>
     <table>
         <tr>
             <th>Aktywo</th>
-            <th>Interwał</th>
-            <th>Cena</th>
-            <th>RSI</th>
-            <th>MACD Hist</th>
-            <th>StochRSI K</th>
-            <th>EMA 20</th>
+            <th>Reżim (1D EMA200)</th>
+            <th>Sygnał Wzorca</th>
+            <th>Dywergencje (1W / 1D / 4H)</th>
+            <th>Notatki Silnika</th>
         </tr>
     """
     
-    for symbol, intervals in aggregated_data.items():
-        for interval, metrics in intervals.items():
+    for symbol, data in aggregated_data.items().get("main_assets", aggregated_data).items():
+        if isinstance(data, dict) and "historical_patterns" in data:
+            pat = data["historical_patterns"]
+            divs = pat.get("divergences", {})
+            div_str = f"1W: {divs.get('1w')} | 1D: {divs.get('1d')} | 4H: {divs.get('4h')}"
             html_content += f"""
         <tr>
             <td>{symbol}</td>
-            <td>{interval}</td>
-            <td>${metrics.get('close', 0)}</td>
-            <td>{metrics.get('rsi', 0)}</td>
-            <td>{metrics.get('macd_hist', 0)}</td>
-            <td>{metrics.get('stoch_k', 0)}</td>
-            <td>${metrics.get('ema20', 0)}</td>
+            <td>{pat.get('regime')}</td>
+            <td><b>{pat.get('pattern_signal')}</b></td>
+            <td>{div_str}</td>
+            <td>{pat.get('notes')}</td>
         </tr>
             """
             
@@ -501,23 +497,20 @@ def send_telegram_message(text):
 
 # --- GŁÓWNA FUNKCJA BOTA ---
 def main():
-    print("Rozpoczynanie pobierania danych wielogiełdowych, makro, sentymentu i pochodnych...")
+    print("Rozpoczynanie pobierania danych, analizy top-down wzorców historycznych i pochodnych...")
     symbols = ["BTC", "STRK", "SOL", "SUI"]
-    intervals = ["1h", "4h", "1d", "1w"]
     
     market_data = {}
     derivatives_data = {}
     
     for symbol in symbols:
-        market_data[symbol] = {}
-        for bar in intervals:
-            market_data[symbol][bar] = get_aggregated_analysis(symbol, bar)
+        market_data[symbol] = get_aggregated_analysis(symbol)
         derivatives_data[symbol] = fetch_derivatives_data(symbol)
             
     macro_sentiment = fetch_macro_and_sentiment_context()
     top_extremes = get_okx_top_extremes()
     
-    print("Przekazywanie kompletnego zestawu danych do AI (Gemini)...")
+    print("Przekazywanie kompletnego zestawu danych (wzorce historyczne + OI + makro) do AI (Gemini)...")
     telegram_text = generate_ai_report({
         "main_assets": market_data,
         "okx_extremes": top_extremes
