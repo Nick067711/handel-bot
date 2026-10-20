@@ -323,7 +323,7 @@ async def fetch_okx_top_extremes(session):
     return results
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & WIELOGIEŁDOWA MAPA LIKWIDACJI STRK ---
+# --- 4. OPEN INTEREST, FUNDING RATES & WIELOGIEŁDOWY SKAN PŁYNNOŚCI (BTC + STRK) ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -333,6 +333,7 @@ async def fetch_derivatives_and_liquidations(session):
         "funding_rate_bybit": "0.01%",
         "funding_rate_strk": "0.01%",
         "liquidations_bybit": "Brak danych (stabilny przepływ)",
+        "liquidation_map_btc": "Brak danych w pełnym zakresie",
         "liquidation_map_strk": "Brak danych w pełnym zakresie",
         "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
@@ -421,10 +422,43 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
 
-    # 8. WIELOGIEŁDOWY SKAN CAŁEGO ARKUSZA STRK (OKX + Binance + Bybit) w poszukiwaniu największych ścian Ask
+    # 8. SKAN PŁYNNOŚCI BITCOINA (BTC) - Ściany Asks oraz Bids z wielu giełd
+    btc_walls = []
+    try:
+        url_btc_okx = "https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=100"
+        async with session.get(url_btc_okx, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                data = res.get("data", [])
+                if data:
+                    for ask in data[0].get("asks", []):
+                        btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "OKX"})
+                    for bid in data[0].get("bids", []):
+                        btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "OKX"})
+    except Exception as e:
+        print(f"BTC OKX Book error: {e}")
+
+    try:
+        url_btc_bn = "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100"
+        async with session.get(url_btc_bn, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                for ask in res.get("asks", []):
+                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Binance"})
+                for bid in res.get("bids", []):
+                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Binance"})
+    except Exception as e:
+        print(f"BTC Binance Book error: {e}")
+
+    if btc_walls:
+        max_btc_ask = max([w for w in btc_walls if w["type"] == "Ask"], key=lambda x: x["size"], default=None)
+        max_btc_bid = max([w for w in btc_walls if w["type"] == "Bid"], key=lambda x: x["size"], default=None)
+        ask_str = f"Ściana Oporu (Ask): ${max_btc_ask['price']:,.2f} ({max_btc_ask['size']:,.2f} BTC na {max_btc_ask['ex']})" if max_btc_ask else "Brak"
+        bid_str = f"Ściana Wsparcia (Bid): ${max_btc_bid['price']:,.2f} ({max_btc_bid['size']:,.2f} BTC na {max_btc_bid['ex']})" if max_btc_bid else "Brak"
+        derivatives_info["liquidation_map_btc"] = f"{ask_str} | {bid_str}"
+
+    # 9. SKAN PŁYNNOŚCI STRK - Ściany Asks oraz Bids w pełnym zakresie
     strk_walls = []
-    
-    # Skan OKX Order Book (pełny zakres głębokości)
     try:
         url_okx_book = "https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=100"
         async with session.get(url_okx_book, timeout=8) as resp:
@@ -433,37 +467,30 @@ async def fetch_derivatives_and_liquidations(session):
                 data = res.get("data", [])
                 if data:
                     for ask in data[0].get("asks", []):
-                        strk_walls.append({"exchange": "OKX", "price": float(ask[0]), "size": float(ask[1])})
+                        strk_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "OKX"})
+                    for bid in data[0].get("bids", []):
+                        strk_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "OKX"})
     except Exception as e:
         print(f"OKX Book scan error: {e}")
 
-    # Skan Binance Order Book
     try:
         url_bn_book = "https://api.binance.com/api/v3/depth?symbol=STRKUSDT&limit=100"
         async with session.get(url_bn_book, timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
-                    strk_walls.append({"exchange": "Binance", "price": float(ask[0]), "size": float(ask[1])})
+                    strk_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Binance"})
+                for bid in res.get("bids", []):
+                    strk_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Binance"})
     except Exception as e:
         print(f"Binance Book scan error: {e}")
 
-    # Skan Bybit Order Book
-    try:
-        url_by_book = "https://api.bybit.com/v5/market/orderbook?category=linear&symbol=STRKUSDT&limit=50"
-        async with session.get(url_by_book, timeout=8) as resp:
-            if resp.status == 200:
-                res = await resp.json()
-                result = res.get("result", {})
-                for ask in result.get("a", []):
-                    strk_walls.append({"exchange": "Bybit", "price": float(ask[0]), "size": float(ask[1])})
-    except Exception as e:
-        print(f"Bybit Book scan error: {e}")
-
     if strk_walls:
-        # Znajdujemy największe zlecenie (najgęstszą ścianę płynności Ask) w całym przeskanowanym zakresie
-        max_wall = max(strk_walls, key=lambda x: x["size"])
-        derivatives_info["liquidation_map_strk"] = f"Największa ściana Ask: ${max_wall['price']} ({max_wall['size']:,.0f} STRK na {max_wall['exchange']})"
+        max_strk_ask = max([w for w in strk_walls if w["type"] == "Ask"], key=lambda x: x["size"], default=None)
+        max_strk_bid = max([w for w in strk_walls if w["type"] == "Bid"], key=lambda x: x["size"], default=None)
+        s_ask = f"Ściana Ask: ${max_strk_ask['price']} ({max_strk_ask['size']:,.0f} STRK na {max_strk_ask['ex']})" if max_strk_ask else "Brak"
+        s_bid = f"Ściana Bid: ${max_strk_bid['price']} ({max_strk_bid['size']:,.0f} STRK na {max_strk_bid['ex']})" if max_strk_bid else "Brak"
+        derivatives_info["liquidation_map_strk"] = f"{s_ask} | {s_bid}"
     else:
         derivatives_info["liquidation_map_strk"] = "Brak danych w pełnym zakresie"
 
@@ -502,12 +529,13 @@ DANE POCHODNE I LIKWIDACJE:
 - Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
 - Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
 - Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
-- Wielogiełdowa Mapa Likwidacji / Ściana Płynności STRK: {deriv_data['liquidation_map_strk']}
+- Mapa Płynności / Ściany BTC: {deriv_data['liquidation_map_btc']}
+- Wielogiełdowa Mapa Płynności STRK: {deriv_data['liquidation_map_strk']}
 - Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
 PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając mapę likwidacji, S (Sonic).
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając mapy płynności i ściany zleceń, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -537,21 +565,8 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
                 await asyncio.sleep(delay)
                 delay *= 2
 
-    # PLAN AWARYJNY (FALLBACK): Jeśli API zawiedzie, bot wysyła twarde dane, zamiast błędu!
-    fallback_part1 = f"""🚨 RAPORT AWARYJNY (Limit API AI przekroczony)
-    
-📊 Rynki Pochodne & Płynność:
-- OI BTC (OKX): {deriv_data['open_interest_okx']}
-- OI STRK (OKX): {deriv_data['open_interest_strk']}
-- Funding Rate BTC: {deriv_data['funding_rate_okx']}
-- Funding Rate STRK: {deriv_data['funding_rate_strk']}
-- Ściana Płynności STRK: {deriv_data['liquidation_map_strk']}
+    return "Błąd generowania analizy przez AI (limity/przeciążenie API Gemini).", "Spróbuj ponownie później."
 
-Szczegółowe wskaźniki techniczne i tablicę interwałów znajdziesz w repozytorium HTML na serwerze."""
-
-    fallback_part2 = "Top Selekcja Altcoinowa z OKX: Sprawdź bezpośrednio plik analityczny na piwecki.pl/analiza ze względu na blokadę AI."
-
-    return fallback_part1, fallback_part2
 
 # --- 6. WYSYŁKA NA TELEGRAM ---
 async def send_telegram(text):
@@ -745,7 +760,8 @@ async def main():
             </div>
         </div>
         <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Wielogiełdowa Mapa Likwidacji / Ściana Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
+            <p><b>Mapa Płynności / Ściany BTC:</b> {deriv_data['liquidation_map_btc']}</p>
+            <p><b>Wielogiełdowa Mapa Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
             <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
