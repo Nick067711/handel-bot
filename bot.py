@@ -34,7 +34,7 @@ class HistoricalPatternEngine:
     @staticmethod
     def calculate_ema(prices, period):
         if len(prices) < period:
-            return float(prices[-1])
+            return float(prices[-1]) if len(prices) > 0 else 0.0
         prices = np.array(prices)
         weights = np.exp(np.linspace(-1., 0., period))
         weights /= weights.sum()
@@ -102,11 +102,11 @@ class HistoricalPatternEngine:
         c_4h = timeframes_data.get("4h", [])
         c_1h = timeframes_data.get("1h", [])
         
-        if not c_1d or len(c_1d) < 200:
+        if not c_1d or len(c_1d) < 20:
             return {"pattern_signal": "NEUTRAL", "regime": "UNKNOWN", "notes": "Niewystarczająca historia danych"}
             
         close_price = c_1d[-1]
-        ema200_1d = cls.calculate_ema(c_1d, 200)
+        ema200_1d = cls.calculate_ema(c_1d, 200) if len(c_1d) >= 200 else cls.calculate_ema(c_1d, len(c_1d))
         regime = "HOSSA (Bullish Regime)" if close_price > ema200_1d else "BESSA (Bearish Regime)"
         
         macd_1m = cls.calculate_macd(c_1m) if len(c_1m) >= 35 else {"hist": 0.0}
@@ -154,7 +154,9 @@ class HistoricalPatternEngine:
 # --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD ---
 def fetch_okx_candles(symbol, bar):
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W", "1M": "1M"}
-    inst_id = f"{symbol}-USDT-SWAP" if "USDT" not in symbol else symbol
+    inst_id = f"{symbol}-USDT-SWAP" if symbol != "BTC" else "BTC-USDT-SWAP"
+    if symbol == "S":
+        inst_id = "S-USDT-SWAP"
     url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar_map.get(bar, '1H')}&limit=250"
     try:
         resp = requests.get(url, timeout=10)
@@ -168,7 +170,7 @@ def fetch_okx_candles(symbol, bar):
 
 def fetch_binance_candles(symbol, bar):
     bar_map = {"1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w", "1M": "1M"}
-    bn_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
+    bn_symbol = f"{symbol}USDT"
     url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bar_map.get(bar, '1h')}&limit=250"
     try:
         resp = requests.get(url, timeout=10)
@@ -182,7 +184,7 @@ def fetch_binance_candles(symbol, bar):
 
 def fetch_kraken_candles(symbol, bar):
     bar_map = {"1h": 60, "4h": 240, "1d": 1440, "1w": 10080, "1M": 21600}
-    pair = f"XBTUSDT" if symbol == "BTC" else f"{symbol}USDT"
+    pair = "XBTUSDT" if symbol == "BTC" else f"{symbol}USDT"
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={bar_map.get(bar, 60)}"
     try:
         resp = requests.get(url, timeout=10)
@@ -198,7 +200,7 @@ def fetch_kraken_candles(symbol, bar):
 
 def fetch_bybit_candles(symbol, bar):
     bar_map = {"1h": "60", "4h": "240", "1d": "D", "1w": "W", "1M": "M"}
-    by_symbol = f"{symbol}USDT" if "USDT" not in symbol else symbol
+    by_symbol = f"{symbol}USDT"
     url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={by_symbol}&interval={bar_map.get(bar, '60')}&limit=250"
     try:
         resp = requests.get(url, timeout=10)
@@ -288,7 +290,7 @@ def get_aggregated_analysis(symbol):
             fetch_bybit_candles(symbol, bar)
         ]
         
-        valid_closes = [closes for closes in sources if isinstance(closes, list) and len(closes) >= 10]
+        valid_closes = [closes for closes in sources if isinstance(closes, list) and len(closes) >= 5]
         if valid_closes:
             best_closes = max(valid_closes, key=len)
             timeframes_candles[bar] = best_closes
@@ -322,7 +324,7 @@ def get_okx_top_extremes():
     results = []
     for sym in symbols:
         c_1d = fetch_okx_candles(sym, "1d")
-        if c_1d and len(c_1d) >= 50:
+        if c_1d and len(c_1d) >= 20:
             rsi = HistoricalPatternEngine.calculate_rsi(c_1d)
             results.append({
                 "symbol": sym,
@@ -335,6 +337,9 @@ def get_okx_top_extremes():
 
 # --- 5. SYNTEZA PRZEZ MODEL AI (Gemini 3.8-flash) ---
 def generate_ai_report(market_data, derivatives_data, macro_sentiment):
+    if not GEMINI_API_KEY:
+        return "Brak skonfigurowanego klucza GEMINI_API_KEY."
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
@@ -381,12 +386,12 @@ Dane analityczne i wzorce historyczne:
 
     payload = {"contents": [{"parts": [{"text": prompt}]}]}
     
-    max_retries = 5
+    max_retries = 3
     backoff_factor = 2
     
     for attempt in range(max_retries):
         try:
-            resp = requests.post(url, json=payload, timeout=45)
+            resp = requests.post(url, json=payload, timeout=30)
             if resp.status_code == 200:
                 res_json = resp.json()
                 return res_json["candidates"][0]["content"]["parts"][0]["text"]
@@ -441,7 +446,7 @@ def generate_html_report(aggregated_data, derivatives_data, macro_sentiment, top
         </tr>
     """
     
-    for symbol, data in aggregated_data.get("main_assets", {}).items():
+    for symbol, data in aggregated_data.items():
         if isinstance(data, dict) and "historical_patterns" in data:
             pat = data["historical_patterns"]
             html_content += f"""
@@ -493,11 +498,14 @@ def generate_html_report(aggregated_data, derivatives_data, macro_sentiment, top
     
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html_content)
-    print("Wygenerowano plik index.html!")
+    print("Pomyślnie wygenerowano plik index.html!")
 
 
 def send_telegram_message(text):
-    """Wysyła jedną skondensowaną wiadomość jako zwykły tekst bez parse_mode."""
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Brak danych konfiguracyjnych dla Telegrama.")
+        return
+
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
@@ -527,6 +535,11 @@ def main():
     macro_sentiment = fetch_macro_and_sentiment_context()
     top_extremes = get_okx_top_extremes()
     
+    # 1. NAJPIERW GENERUJEMY PLIK HTML (Gwarancja istnienia pliku dla kroków FTP w Actions)
+    print("Generowanie pliku index.html...")
+    generate_html_report(market_data, derivatives_data, macro_sentiment, top_extremes)
+    
+    # 2. NASTĘPNIE GENERUJEMY RAPORT AI I WYSYŁAMY NA TELEGRAM
     print("Przekazywanie kompletnego zestawu danych do AI (Gemini)...")
     ai_response = generate_ai_report({
         "main_assets": market_data,
@@ -536,8 +549,6 @@ def main():
     print("Wysyłanie ostatecznego raportu na Telegram...")
     send_telegram_message(ai_response)
     
-    print("Generowanie pliku index.html dla serwera FTP...")
-    generate_html_report(market_data, derivatives_data, macro_sentiment, top_extremes)
     print("Bot zakończył działanie pomyślnie.")
 
 if __name__ == "__main__":
