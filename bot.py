@@ -323,17 +323,21 @@ async def fetch_okx_top_extremes(session):
     return results
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & LIKWIDACJE ---
+# --- 4. OPEN INTEREST, FUNDING RATES & MAPA LIKWIDACJI (DLA BTC I STRK) ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
         "open_interest_bybit": "Brak danych",
+        "open_interest_strk": "Brak danych",
         "funding_rate_okx": "0.01%",
         "funding_rate_bybit": "0.01%",
+        "funding_rate_strk": "0.01%",
         "liquidations_bybit": "Brak danych (stabilny przepływ)",
+        "liquidation_map_strk": "Brak danych (obszar nagromadzenia $0.060 - $0.061)",
         "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
     
+    # 1. Open Interest BTC OKX
     try:
         url_oi_okx = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
         async with session.get(url_oi_okx, timeout=8) as resp:
@@ -344,6 +348,7 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI OKX error: {e}")
 
+    # 2. Open Interest BTC Bybit
     try:
         url_oi_bybit = "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=4h&limit=1"
         async with session.get(url_oi_bybit, timeout=8) as resp:
@@ -355,6 +360,18 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI Bybit error: {e}")
 
+    # 3. Open Interest STRK OKX (Dedykowany dla pozycji użytkownika)
+    try:
+        url_oi_strk = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=STRK-USDT-SWAP"
+        async with session.get(url_oi_strk, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                if res.get("data"):
+                    derivatives_info["open_interest_strk"] = f"{float(res['data'][0].get('oiCcy', 0)):,.2f} STRK"
+    except Exception as e:
+        print(f"OI STRK OKX error: {e}")
+
+    # 4. Funding Rate BTC OKX
     try:
         url_fr_okx = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP"
         async with session.get(url_fr_okx, timeout=8) as resp:
@@ -366,6 +383,7 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate OKX error: {e}")
 
+    # 5. Funding Rate BTC Bybit
     try:
         url_fr_bybit = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
         async with session.get(url_fr_bybit, timeout=8) as resp:
@@ -378,6 +396,19 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate Bybit error: {e}")
 
+    # 6. Funding Rate STRK OKX
+    try:
+        url_fr_strk = "https://www.okx.com/api/v5/public/funding-rate?instId=STRK-USDT-SWAP"
+        async with session.get(url_fr_strk, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                if res.get("data"):
+                    fr = float(res['data'][0].get('fundingRate', 0)) * 100
+                    derivatives_info["funding_rate_strk"] = f"{fr:.4f}%"
+    except Exception as e:
+        print(f"Funding Rate STRK OKX error: {e}")
+
+    # 7. Presja likwidacyjna / transakcje Bybit BTC
     try:
         url_liq = "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=BTCUSDT&limit=50"
         async with session.get(url_liq, timeout=8) as resp:
@@ -389,6 +420,26 @@ async def fetch_derivatives_and_liquidations(session):
                 derivatives_info["liquidations_bybit"] = f"Presja Buy: {large_buys} | Presja Sell: {large_sells} dużych transakcji"
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
+
+    # 8. Skanowanie arkusza i mapy likwidacji STRK (szukanie ściany $0.060 - $0.061)
+    try:
+        url_book_strk = "https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=50"
+        async with session.get(url_book_strk, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                data = res.get("data", [])
+                if data:
+                    asks = data[0].get("asks", [])
+                    # Sprawdzamy nagromadzenie zleceń w przedziale $0.060 - $0.061
+                    wall_volume = 0
+                    for ask in asks:
+                        price = float(ask[0])
+                        size = float(ask[1])
+                        if 0.060 <= price <= 0.061:
+                            wall_volume += size
+                    derivatives_info["liquidation_map_strk"] = f"Nagromadzenie Ask ($0.060-$0.061): {wall_volume:,.0f} STRK (Cel i Opór strukturalny)"
+    except Exception as e:
+        print(f"STRK Orderbook/Liquidation Map error: {e}")
 
     return derivatives_info
 
@@ -421,15 +472,16 @@ TOP SELEKCJA EKSTREMÓW OKX (DANE Z WYKRESU 1D):
 {okx_extremes}
 
 DANE POCHODNE I LIKWIDACJE:
-- Open Interest (OKX): {deriv_data['open_interest_okx']}
-- Open Interest (Bybit): {deriv_data['open_interest_bybit']}
-- Funding Rate (OKX): {deriv_data['funding_rate_okx']}
-- Funding Rate (Bybit): {deriv_data['funding_rate_bybit']}
-- Monitor Likwidacji / Presja (Bybit): {deriv_data['liquidations_bybit']}
+- Open Interest (OKX BTC): {deriv_data['open_interest_okx']}
+- Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
+- Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
+- Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
+- Mapa Likwidacji / Ściana Płynności STRK: {deriv_data['liquidation_map_strk']}
+- Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
 PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet), S (Sonic).
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając strefę płynności i cel $0.060-$0.061, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -637,24 +689,25 @@ async def main():
         <h2>1. Rynek Pochodnych, Funding Rates & Baza Kosztowa On-Chain</h2>
         <div class="deriv-grid">
             <div class="deriv-card">
-                <span>Open Interest (OKX)</span>
+                <span>Open Interest (BTC OKX)</span>
                 <strong>{deriv_data['open_interest_okx']}</strong>
             </div>
             <div class="deriv-card">
-                <span>Open Interest (Bybit)</span>
-                <strong>{deriv_data['open_interest_bybit']}</strong>
+                <span>Open Interest (STRK OKX)</span>
+                <strong>{deriv_data['open_interest_strk']}</strong>
             </div>
             <div class="deriv-card">
-                <span>Funding Rate (OKX)</span>
+                <span>Funding Rate (BTC OKX)</span>
                 <strong>{deriv_data['funding_rate_okx']}</strong>
             </div>
             <div class="deriv-card">
-                <span>Funding Rate (Bybit)</span>
-                <strong>{deriv_data['funding_rate_bybit']}</strong>
+                <span>Funding Rate (STRK OKX)</span>
+                <strong>{deriv_data['funding_rate_strk']}</strong>
             </div>
         </div>
         <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit):</b> {deriv_data['liquidations_bybit']}</p>
+            <p><b>Mapa Likwidacji / Ściana Płynności STRK ($0.060 - $0.061):</b> {deriv_data['liquidation_map_strk']}</p>
+            <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
 
