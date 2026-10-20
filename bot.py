@@ -323,7 +323,7 @@ async def fetch_okx_top_extremes(session):
     return results
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & MAPA LIKWIDACJI (DLA BTC I STRK) ---
+# --- 4. OPEN INTEREST, FUNDING RATES & WIELOGIEŁDOWA MAPA LIKWIDACJI STRK ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -333,7 +333,7 @@ async def fetch_derivatives_and_liquidations(session):
         "funding_rate_bybit": "0.01%",
         "funding_rate_strk": "0.01%",
         "liquidations_bybit": "Brak danych (stabilny przepływ)",
-        "liquidation_map_strk": "Brak danych (obszar nagromadzenia $0.060 - $0.061)",
+        "liquidation_map_strk": "Brak danych w pełnym zakresie",
         "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
     
@@ -360,7 +360,7 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI Bybit error: {e}")
 
-    # 3. Open Interest STRK OKX (Dedykowany dla pozycji użytkownika)
+    # 3. Open Interest STRK OKX
     try:
         url_oi_strk = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=STRK-USDT-SWAP"
         async with session.get(url_oi_strk, timeout=8) as resp:
@@ -421,25 +421,51 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
 
-    # 8. Skanowanie arkusza i mapy likwidacji STRK (szukanie ściany $0.060 - $0.061)
+    # 8. WIELOGIEŁDOWY SKAN CAŁEGO ARKUSZA STRK (OKX + Binance + Bybit) w poszukiwaniu największych ścian Ask
+    strk_walls = []
+    
+    # Skan OKX Order Book (pełny zakres głębokości)
     try:
-        url_book_strk = "https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=50"
-        async with session.get(url_book_strk, timeout=8) as resp:
+        url_okx_book = "https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=100"
+        async with session.get(url_okx_book, timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 data = res.get("data", [])
                 if data:
-                    asks = data[0].get("asks", [])
-                    # Sprawdzamy nagromadzenie zleceń w przedziale $0.060 - $0.061
-                    wall_volume = 0
-                    for ask in asks:
-                        price = float(ask[0])
-                        size = float(ask[1])
-                        if 0.060 <= price <= 0.061:
-                            wall_volume += size
-                    derivatives_info["liquidation_map_strk"] = f"Nagromadzenie Ask ($0.060-$0.061): {wall_volume:,.0f} STRK (Cel i Opór strukturalny)"
+                    for ask in data[0].get("asks", []):
+                        strk_walls.append({"exchange": "OKX", "price": float(ask[0]), "size": float(ask[1])})
     except Exception as e:
-        print(f"STRK Orderbook/Liquidation Map error: {e}")
+        print(f"OKX Book scan error: {e}")
+
+    # Skan Binance Order Book
+    try:
+        url_bn_book = "https://api.binance.com/api/v3/depth?symbol=STRKUSDT&limit=100"
+        async with session.get(url_bn_book, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                for ask in res.get("asks", []):
+                    strk_walls.append({"exchange": "Binance", "price": float(ask[0]), "size": float(ask[1])})
+    except Exception as e:
+        print(f"Binance Book scan error: {e}")
+
+    # Skan Bybit Order Book
+    try:
+        url_by_book = "https://api.bybit.com/v5/market/orderbook?category=linear&symbol=STRKUSDT&limit=50"
+        async with session.get(url_by_book, timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                result = res.get("result", {})
+                for ask in result.get("a", []):
+                    strk_walls.append({"exchange": "Bybit", "price": float(ask[0]), "size": float(ask[1])})
+    except Exception as e:
+        print(f"Bybit Book scan error: {e}")
+
+    if strk_walls:
+        # Znajdujemy największe zlecenie (najgęstszą ścianę płynności Ask) w całym przeskanowanym zakresie
+        max_wall = max(strk_walls, key=lambda x: x["size"])
+        derivatives_info["liquidation_map_strk"] = f"Największa ściana Ask: ${max_wall['price']} ({max_wall['size']:,.0f} STRK na {max_wall['exchange']})"
+    else:
+        derivatives_info["liquidation_map_strk"] = "Brak danych w pełnym zakresie"
 
     return derivatives_info
 
@@ -476,12 +502,12 @@ DANE POCHODNE I LIKWIDACJE:
 - Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
 - Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
 - Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
-- Mapa Likwidacji / Ściana Płynności STRK: {deriv_data['liquidation_map_strk']}
+- Wielogiełdowa Mapa Likwidacji / Ściana Płynności STRK: {deriv_data['liquidation_map_strk']}
 - Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
 PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając strefę płynności i cel $0.060-$0.061, S (Sonic).
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając pełną mapę likwidacji i ściany płynności z giełd, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -706,7 +732,7 @@ async def main():
             </div>
         </div>
         <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Mapa Likwidacji / Ściana Płynności STRK ($0.060 - $0.061):</b> {deriv_data['liquidation_map_strk']}</p>
+            <p><b>Wielogiełdowa Mapa Likwidacji / Ściana Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
             <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
