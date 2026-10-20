@@ -384,8 +384,8 @@ async def fetch_derivatives_and_liquidations(session):
             if resp.status == 200:
                 res = await resp.json()
                 trades = res.get("result", {}).get("list", [])
-                large_sells = sum(1 for t in trades if t.get("side") == "Sell" and float(t.get("size", 0)) > 2.0)
-                large_buys = sum(1 for t in trades if t.get("side") == "Buy" and float(t.get("size", 0)) > 2.0)
+                large_sells = sum(1 for t in trades if t.get("side"] == "Sell" and float(t.get("size", 0)) > 2.0)
+                large_buys = sum(1 for t in trades if t.get("side"] == "Buy" and float(t.get("size", 0)) > 2.0)
                 derivatives_info["liquidations_bybit"] = f"Presja Buy: {large_buys} | Presja Sell: {large_sells} dużych transakcji"
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
@@ -393,8 +393,12 @@ async def fetch_derivatives_and_liquidations(session):
     return derivatives_info
 
 
-# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI (TYLKO DLA TELEGRAMA) ---
-async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_extremes, max_retries=3, initial_delay=4):
+# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI DLA TELEGRAMA Z ROTACJĄ MODELI ---
+async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_extremes, max_retries=3, initial_delay=5):
+    if not GEMINI_API_KEY:
+        print("Brak klucza GEMINI_API_KEY.")
+        return "Brak skonfigurowanego klucza API Gemini.", "Brak danych."
+
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
@@ -435,6 +439,7 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
         delay = initial_delay
         for attempt in range(1, max_retries + 1):
             try:
+                print(f"Próba wywołania Gemini ({model_name}), próba {attempt}...")
                 response = client.models.generate_content(
                     model=model_name,
                     contents=prompt
@@ -454,7 +459,7 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
                 await asyncio.sleep(delay)
                 delay *= 2
 
-    return "Błąd generowania analizy (przeciążenie API Gemini).", "Spróbuj ponownie później."
+    return "Błąd generowania analizy przez AI (limity/przeciążenie API Gemini).", "Spróbuj ponownie później."
 
 
 # --- 6. WYSYŁKA NA TELEGRAM ---
@@ -537,13 +542,13 @@ async def main():
         for item in okx_extremes[:3]:
             okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI: {item['rsi']}\n"
 
-        # 1. Generujemy analizę AI wyłącznie na Telegram
+        # 1. Generujemy profesjonalną analizę AI dla Telegrama (dwie niezależne wiadomości)
         part1, part2 = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_summary)
         await send_telegram(part1)
         await asyncio.sleep(1)
         await send_telegram(part2)
         
-        # 2. Budujemy potężne, czysto analityczne repozytorium danych do pliku HTML (BEZ TEKSTU AI)
+        # 2. Budujemy czyste, potężne repozytorium surowych danych w pliku HTML (BEZ TEKSTU AI)
         html_boxes = ""
         for sym in symbols:
             rows = ""
@@ -676,7 +681,7 @@ async def main():
 """
         # 3. Wysłanie czystego repozytorium danych na FTP
         upload_html_to_ftp(html_content)
-        print("Proces zakończony pomyślnie. Plik HTML zawiera komplet surowych danych i wskaźników.")
+        print("Proces zakończony pomyślnie.")
 
 if __name__ == "__main__":
     asyncio.run(main())
