@@ -282,7 +282,7 @@ def get_okx_top_extremes():
     return results[:3]
 
 
-# --- 5. SYNTEZA PRZEZ MODEL AI (Gemini 3.8-flash) ---
+# --- 5. SYNTEZA PRZEZ MODEL AI (Gemini 3.8-flash ze szczegółowym logowaniem) ---
 def generate_ai_report(market_data, derivatives_data, macro_sentiment):
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
     
@@ -343,10 +343,22 @@ Dane analityczne, makro i sentyment:
     
     for attempt in range(max_retries):
         try:
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, timeout=45)
+            print(f"Gemini API Status Code: {resp.status_code}")
+            
             if resp.status_code == 200:
                 res_json = resp.json()
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
+                if "candidates" in res_json and len(res_json["candidates"]) > 0:
+                    candidate = res_json["candidates"][0]
+                    if "content" in candidate and "parts" in candidate["content"]:
+                        return candidate["content"]["parts"][0]["text"]
+                    else:
+                        print(f"Ostrzeżenie Gemini (brak content/parts, np. blokada bezpieczeństwa): {candidate}")
+                        return f"Błąd AI: Odpowiedź zablokowana lub pusta."
+                else:
+                    print(f"Ostrzeżenie Gemini (brak candidates w JSON): {res_json}")
+                    return "Błąd AI: Brak kandydatów w odpowiedzi."
+                    
             elif resp.status_code in [429, 503]:
                 sleep_time = backoff_factor ** attempt
                 print(f"API błąd {resp.status_code}. Ponawianie za {sleep_time}s...")
@@ -355,7 +367,7 @@ Dane analityczne, makro i sentyment:
                 print(f"Gemini API Error: {resp.status_code} - {resp.text}")
                 break
         except Exception as e:
-            print(f"Wyjątek podczas łączenia z Gemini: {e}")
+            print(f"Wyjątek podczas łączenia z Gemini (próba {attempt+1}): {e}")
             time.sleep(2 ** attempt)
             
     return "Błąd generowania raportu przez AI."
