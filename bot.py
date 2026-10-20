@@ -282,9 +282,9 @@ def get_okx_top_extremes():
     return results[:3]
 
 
-# --- 5. SYNTEZA PRZEZ MODEL AI (Gemini 3.8-flash ze szczegółowym logowaniem) ---
+# --- 5. SYNTEZA PRZEZ MODEL AI  ---
 def generate_ai_report(market_data, derivatives_data, macro_sentiment):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     
     prompt = f"""
 Jesteś wybitnym analitykiem rynków kryptowalut. Masz do dyspozycji:
