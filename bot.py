@@ -422,11 +422,12 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
 
-    # 8. SKAN PŁYNNOŚCI BITCOINA (BTC) - Ściany Asks oraz Bids z wielu giełd
+    # 8. WIELOGIEŁDOWY SKAN PŁYNNOŚCI BITCOINA (BTC) - OKX, Binance, Bybit, Kraken
     btc_walls = []
+    
+    # OKX BTC
     try:
-        url_btc_okx = "https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=100"
-        async with session.get(url_btc_okx, timeout=8) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=100", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 data = res.get("data", [])
@@ -438,9 +439,9 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"BTC OKX Book error: {e}")
 
+    # Binance BTC
     try:
-        url_btc_bn = "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100"
-        async with session.get(url_btc_bn, timeout=8) as resp:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=100", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
@@ -450,6 +451,32 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"BTC Binance Book error: {e}")
 
+    # Bybit BTC
+    try:
+        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=50", timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                result = res.get("result", {})
+                for ask in result.get("a", []):
+                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Bybit"})
+                for bid in result.get("b", []):
+                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Bybit"})
+    except Exception as e:
+        print(f"BTC Bybit Book error: {e}")
+
+    # Kraken BTC
+    try:
+        async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=50", timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                result = res.get("result", {}).get("XXBTZUSDT", {}) or res.get("result", {}).get("XBTUSDT", {})
+                for ask in result.get("asks", []):
+                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Kraken"})
+                for bid in result.get("bids", []):
+                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Kraken"})
+    except Exception as e:
+        print(f"BTC Kraken Book error: {e}")
+
     if btc_walls:
         max_btc_ask = max([w for w in btc_walls if w["type"] == "Ask"], key=lambda x: x["size"], default=None)
         max_btc_bid = max([w for w in btc_walls if w["type"] == "Bid"], key=lambda x: x["size"], default=None)
@@ -457,11 +484,10 @@ async def fetch_derivatives_and_liquidations(session):
         bid_str = f"Ściana Wsparcia (Bid): ${max_btc_bid['price']:,.2f} ({max_btc_bid['size']:,.2f} BTC na {max_btc_bid['ex']})" if max_btc_bid else "Brak"
         derivatives_info["liquidation_map_btc"] = f"{ask_str} | {bid_str}"
 
-    # 9. SKAN PŁYNNOŚCI STRK - Ściany Asks oraz Bids w pełnym zakresie
+    # 9. SKAN PŁYNNOŚCI STRK - Ściany Asks oraz Bids z wielu giełd
     strk_walls = []
     try:
-        url_okx_book = "https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=100"
-        async with session.get(url_okx_book, timeout=8) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=100", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 data = res.get("data", [])
@@ -474,8 +500,7 @@ async def fetch_derivatives_and_liquidations(session):
         print(f"OKX Book scan error: {e}")
 
     try:
-        url_bn_book = "https://api.binance.com/api/v3/depth?symbol=STRKUSDT&limit=100"
-        async with session.get(url_bn_book, timeout=8) as resp:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=STRKUSDT&limit=100", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
@@ -529,13 +554,13 @@ DANE POCHODNE I LIKWIDACJE:
 - Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
 - Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
 - Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
-- Mapa Płynności / Ściany BTC: {deriv_data['liquidation_map_btc']}
+- Wielogiełdowa Mapa Płynności / Ściany BTC: {deriv_data['liquidation_map_btc']}
 - Wielogiełdowa Mapa Płynności STRK: {deriv_data['liquidation_map_strk']}
 - Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
 PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając mapy płynności i ściany zleceń, S (Sonic).
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając mapy płynności i ściany zleceń z wielu giełd, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -760,7 +785,7 @@ async def main():
             </div>
         </div>
         <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Mapa Płynności / Ściany BTC:</b> {deriv_data['liquidation_map_btc']}</p>
+            <p><b>Wielogiełdowa Mapa Płynności / Ściany BTC (OKX, Binance, Bybit, Kraken):</b> {deriv_data['liquidation_map_btc']}</p>
             <p><b>Wielogiełdowa Mapa Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
             <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
