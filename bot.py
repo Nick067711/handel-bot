@@ -507,7 +507,7 @@ DANE POCHODNE I LIKWIDACJE:
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
 PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając pełną mapę likwidacji i ściany płynności z giełd, S (Sonic).
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając mapę likwidacji, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -537,8 +537,21 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
                 await asyncio.sleep(delay)
                 delay *= 2
 
-    return "Błąd generowania analizy przez AI (limity/przeciążenie API Gemini).", "Spróbuj ponownie później."
+    # PLAN AWARYJNY (FALLBACK): Jeśli API zawiedzie, bot wysyła twarde dane, zamiast błędu!
+    fallback_part1 = f"""🚨 RAPORT AWARYJNY (Limit API AI przekroczony)
+    
+📊 Rynki Pochodne & Płynność:
+- OI BTC (OKX): {deriv_data['open_interest_okx']}
+- OI STRK (OKX): {deriv_data['open_interest_strk']}
+- Funding Rate BTC: {deriv_data['funding_rate_okx']}
+- Funding Rate STRK: {deriv_data['funding_rate_strk']}
+- Ściana Płynności STRK: {deriv_data['liquidation_map_strk']}
 
+Szczegółowe wskaźniki techniczne i tablicę interwałów znajdziesz w repozytorium HTML na serwerze."""
+
+    fallback_part2 = "Top Selekcja Altcoinowa z OKX: Sprawdź bezpośrednio plik analityczny na piwecki.pl/analiza ze względu na blokadę AI."
+
+    return fallback_part1, fallback_part2
 
 # --- 6. WYSYŁKA NA TELEGRAM ---
 async def send_telegram(text):
