@@ -102,7 +102,6 @@ class TechnicalEngine:
         macd = TechnicalEngine.calculate_macd(c)
         stoch = TechnicalEngine.calculate_stoch_rsi(c)
         
-        # Logika patternów i prawdopodobieństwa zwrotu
         signal_bias = "NEUTRAL"
         if rsi < 35 and stoch["k"] < 20 and close_price > ema50 * 0.95:
             signal_bias = "POTENTIAL_LONG"
@@ -227,8 +226,6 @@ def fetch_derivatives_data(symbol):
 
 # --- 4. KONTEKST MAKROEKONOMICZNY (USA / FED) ORAZ SENTYMENT FORUM ---
 def fetch_macro_and_sentiment_context():
-    """Symulacja / pobieranie nastrojów z forów oraz kontekstu FED / makro USA."""
-    # Zbieranie ogólnego sentymentu nastrojów kryptowalutowych i rynkowych
     sentiment_data = {
         "forum_sentiment": "Mieszany/Neutralny z przewagą ostrożności w mediach społecznościowych",
         "fed_context": "Bieżąca polityka monetarna FED: uwaga skupiona na danych o inflacji oraz płynności w sektorze bankowym/repo",
@@ -254,7 +251,7 @@ def get_aggregated_analysis(symbol, bar):
     if not valid_analyses:
         return {"close": 0.0, "rsi": 50.0, "signal_bias": "NEUTRAL"}
 
-    avg_ close = round(float(np.mean([a["close"] for a in valid_analyses])), 4 if symbol in ["STRK", "SUI"] else 2)
+    avg_close = round(float(np.mean([a["close"] for a in valid_analyses])), 4 if symbol in ["STRK", "SUI"] else 2)
     avg_rsi = round(float(np.mean([a["rsi"] for a in valid_analyses])), 2)
     avg_macd_hist = round(float(np.mean([a["macd_hist"] for a in valid_analyses])), 4)
     avg_stoch_k = round(float(np.mean([a["stoch_k"] for a in valid_analyses])), 2)
