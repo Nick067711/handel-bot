@@ -41,13 +41,19 @@ class HistoricalPatternEngine:
 
     @staticmethod
     def calculate_ema(prices, period):
+        if not prices:
+            return 0.0
         if len(prices) < period:
-            return float(prices[-1]) if len(prices) > 0 else 0.0
+            period = len(prices)
+        if period <= 0:
+            return float(prices[-1])
         prices = np.array(prices)
         weights = np.exp(np.linspace(-1., 0., period))
         weights /= weights.sum()
         ema = np.convolve(prices, weights, mode='full')[:len(prices)]
-        ema[:period] = ema[period]
+        idx = min(period, len(ema) - 1)
+        if idx >= 0:
+            ema[:period] = ema[idx]
         return round(float(ema[-1]), 5)
 
     @staticmethod
