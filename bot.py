@@ -162,7 +162,6 @@ class HistoricalPatternEngine:
         elif 76500 <= close_price <= 78500:
             cost_basis_status = "TEST_TRUE_MARKET_MEAN (~77.5k)"
 
-        # Wyliczenie progresu i priorytetu pod Short Traps / wykupienia
         progress = int(min(max((rsi_1d / 100.0) * 100, 0), 100))
 
         pattern_signal = "NEUTRAL"
@@ -322,7 +321,7 @@ async def fetch_okx_top_extremes(session):
                 "symbol": sym,
                 "close": closes[-1],
                 "rsi": rsi,
-                "extreme_score": rsi # Priorytet wykupienia pod Short Trap
+                "extreme_score": rsi
             })
     results = sorted(results, key=lambda x: x["extreme_score"], reverse=True)
     return results
@@ -374,7 +373,7 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     return best_ask_str, best_bid_str
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI (PEŁNY ZE WSZYSTKICH GIEŁD) ---
+# --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -389,7 +388,6 @@ async def fetch_derivatives_and_liquidations(session):
         "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
     
-    # 1. Open Interest BTC OKX
     try:
         url_oi_okx = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=BTC-USDT-SWAP"
         async with session.get(url_oi_okx, timeout=8) as resp:
@@ -400,7 +398,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI OKX error: {e}")
 
-    # 2. Open Interest BTC Bybit
     try:
         url_oi_bybit = "https://api.bybit.com/v5/market/open-interest?category=linear&symbol=BTCUSDT&intervalTime=4h&limit=1"
         async with session.get(url_oi_bybit, timeout=8) as resp:
@@ -412,7 +409,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI Bybit error: {e}")
 
-    # 3. Open Interest STRK OKX
     try:
         url_oi_strk = "https://www.okx.com/api/v5/public/open-interest?instType=SWAP&instId=STRK-USDT-SWAP"
         async with session.get(url_oi_strk, timeout=8) as resp:
@@ -423,7 +419,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"OI STRK OKX error: {e}")
 
-    # 4. Funding Rate BTC OKX
     try:
         url_fr_okx = "https://www.okx.com/api/v5/public/funding-rate?instId=BTC-USDT-SWAP"
         async with session.get(url_fr_okx, timeout=8) as resp:
@@ -435,7 +430,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate OKX error: {e}")
 
-    # 5. Funding Rate BTC Bybit
     try:
         url_fr_bybit = "https://api.bybit.com/v5/market/tickers?category=linear&symbol=BTCUSDT"
         async with session.get(url_fr_bybit, timeout=8) as resp:
@@ -448,7 +442,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate Bybit error: {e}")
 
-    # 6. Funding Rate STRK OKX
     try:
         url_fr_strk = "https://www.okx.com/api/v5/public/funding-rate?instId=STRK-USDT-SWAP"
         async with session.get(url_fr_strk, timeout=8) as resp:
@@ -460,7 +453,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Funding Rate STRK OKX error: {e}")
 
-    # 7. Presja likwidacyjna / transakcje Bybit BTC
     try:
         url_liq = "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=BTCUSDT&limit=50"
         async with session.get(url_liq, timeout=8) as resp:
@@ -473,7 +465,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
 
-    # Pobranie cen referencyjnych do bufora 10%
     btc_current_price = 82800.0
     try:
         async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5) as resp:
@@ -483,9 +474,7 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception:
         pass
 
-    # 8. WIELOGIEŁDOWY SKAN PŁYNNOŚCI BTC (OKX, Binance, Bybit, Kraken)
     btc_walls = []
-    
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=400", timeout=8) as resp:
             if resp.status == 200:
@@ -538,7 +527,6 @@ async def fetch_derivatives_and_liquidations(session):
         ask_zone, bid_zone = aggregate_baskets_to_zones(btc_walls, btc_current_price, is_btc=True)
         derivatives_info["liquidation_map_btc"] = f"Strefa Oporu (Ask): {ask_zone} | Strefa Wsparcia (Bid): {bid_zone}"
 
-    # 9. SKAN PŁYNNOŚCI STRK (z uwzględnieniem wielu giełd)
     strk_current_price = 0.058
     try:
         async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=STRKUSDT", timeout=5) as resp:
@@ -582,100 +570,85 @@ async def fetch_derivatives_and_liquidations(session):
     return derivatives_info
 
 
-# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI DLA TELEGRAMA (ROTAKCJA MODELI I STABILNOŚĆ) ---
-async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_extremes, max_retries=3, initial_delay=5):
+# --- 5. ROZBITE, LEKKIE ZAPYTANIA DO AI (CZĘŚĆ 1 ORAZ CZĘŚĆ 2) ---
+async def generate_ai_part1(tech_summary, deriv_data, pattern_summary):
     if not GEMINI_API_KEY:
-        print("Brak klucza GEMINI_API_KEY.")
-        return "Brak skonfigurowanego klucza API Gemini.", "Brak danych."
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
+        return "Brak klucza API Gemini."
     
+    client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
-Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor.
-Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W, 1M), wyliczone sygnały techniczne i progres/wykupienie, zagregowane strefy płynności z wielu giełd oraz instrumenty pochodne ze szczególnym uwzględnieniem polowania na shorty (Short Trap).
+Jesteś profesjonalnym analitykiem rynkowym. Przygotuj Część 1 raportu (Kondycja Rynku, BTC, STRK, S) na podstawie poniższych danych.
+BEZWZGLĘDNE ZASADY:
+1. Brak wstępów.
+2. Zakaz podawania dokładnych wartości liczb wskaźników (RSI, MACD) w tekście.
+3. Skup się na strukturze, reżimie i strefach płynności.
 
-BEZWZGLĘDNE ZASADY FORMATOWANIA TELEGRAMA:
-1. ŻADNEGO WSTĘPU. Raport rozpoczyna się od analizy BTC.
-2. BEZWZGLĘDNY ZAKAZ PODAWANIA LICZB/WARTOŚCI WSKAŹNIKÓW w tekście (brak podawania konkretnych liczb RSI, MACD, StochRSI). Użytkownik odczytuje wartości sam z pliku HTML.
-3. AKTYWA TARGETOWE: BTC, STRK (Starknet) oraz S (Sonic / S/USDC). Uwaga: 'S' oznacza Sonic, nie pomył z Solaną (SOL).
-4. Przekaz ma być skondensowany, skupiony na strukturze, reżimie rynkowym, strefach płynności oraz ostatecznych wnioskach AI pod kątem Short Trap.
-
-STAN TECHNICZNY I PROGRES SYGNAŁÓW:
+STAN TECHNICZNY I WZORCE:
 {pattern_summary}
 
-DANE TECHNICZNE (UŚREDNIONE Z GIEŁD):
-{tech_summary}
-
-TOP SELEKCJA EKSTREMÓW / WYKUPIEŃ OKX (1D - SHORT TRAP TARGETS):
-{okx_extremes}
-
-ZAGREGOWANE STREFY PŁYNNOŚCI (OKX, Binance, Bybit, Kraken):
-- Zagregowana Mapa Płynności BTC: {deriv_data['liquidation_map_btc']}
-- Zagregowana Mapa Płynności STRK: {deriv_data['liquidation_map_strk']}
-- Open Interest (OKX BTC): {deriv_data['open_interest_okx']}
-- Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
-- Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
-- Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
-- Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
-- Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
-
-PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJĄ "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając zagregowane strefy płynności, S (Sonic).
-Część 2: Top Selekcja Short Trap (wykupione projekty z potencjałem gwałtownego spadku z OKX).
+ZAGREGOWANE STREFY PŁYNNOŚCI I POCHODNE:
+- BTC Płynność: {deriv_data['liquidation_map_btc']}
+- STRK Płynność: {deriv_data['liquidation_map_strk']}
+- OI BTC: {deriv_data['open_interest_okx']} | OI STRK: {deriv_data['open_interest_strk']}
+- Funding Rates: BTC {deriv_data['funding_rate_okx']} | STRK {deriv_data['funding_rate_strk']}
+- Baza Kosztowa: {deriv_data['realized_price']}
 """
-    
     candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    
-    for model_name in candidate_models:
-        delay = initial_delay
-        for attempt in range(1, max_retries + 1):
+    for model in candidate_models:
+        for attempt in range(1, 3):
             try:
-                print(f"Próba wywołania Gemini ({model_name}), próba {attempt}...")
-                response = client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
+                response = client.models.generate_content(model=model, contents=prompt)
                 if response and response.text:
-                    text = response.text.strip()
-                    parts = text.split("Top Selekcja")
-                    part1 = parts[0].strip()
-                    part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Short Trap: Brak dodatkowych wskazań."
-                    return part1, part2
-            except APIError as e:
-                print(f"Ostrzeżenie API Gemini {model_name}: {e}")
+                    return response.text.strip()
             except Exception as e:
-                print(f"Błąd wywołania {model_name}: {e}")
-                
-            if attempt < max_retries:
-                await asyncio.sleep(delay)
-                delay *= 2
-
-    # Jeśli modele zawiodą po wszystkich próbach, wykonujemy powtórne zapytanie z dłuższą przerwą na domyślnym modelu
-    await asyncio.sleep(10)
-    try:
-        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        if response and response.text:
-            text = response.text.strip()
-            parts = text.split("Top Selekcja")
-            return parts[0].strip(), ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Short Trap"
-    except Exception as ex:
-        print(f"Ostateczny awaryjny ratunek API: {ex}")
-
-    return "Błąd generowania analizy przez AI (chwilowy limit API, sprawdź plik HTML na stronie).", "Top Selekcja Short Trap: Brak danych."
+                print(f"Ostrzeżenie API Część 1 ({model}): {e}")
+                await asyncio.sleep(3)
+    return "Analiza makro niedostępna (chwilowy limit API)."
 
 
-# --- 6. WYSYŁKA NA TELEGRAM ---
+async def generate_ai_part2(okx_extremes):
+    if not GEMINI_API_KEY:
+        return "Brak klucza API Gemini."
+    
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    prompt = f"""
+Przygotuj Część 2 raportu: Top Selekcja Short Trap (wykupione projekty z OKX z potencjałem gwałtownego spadku).
+Zasady: Krótko, profesjonalnie, bez podawania dokładnych wartości wskaźników w tekście.
+
+DANE EKSTREMÓW OKX (SHORT TRAP TARGETS):
+{okx_extremes}
+"""
+    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    for model in candidate_models:
+        for attempt in range(1, 3):
+            try:
+                response = client.models.generate_content(model=model, contents=prompt)
+                if response and response.text:
+                    return response.text.strip()
+            except Exception as e:
+                print(f"Ostrzeżenie API Część 2 ({model}): {e}")
+                await asyncio.sleep(3)
+    return "Top Selekcja Short Trap: Brak danych z API."
+
+
+# --- 6. WYSYŁKA NA TELEGRAM (Z PODZIAŁEM NA CHUNKI > 4096 ZNAKÓW) ---
 async def send_telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Brak danych konfiguracyjnych Telegrama.")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    
+    # Podział na chunki o maksymalnej długości 4000 znaków
+    max_len = 4000
+    chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
+    
     async with aiohttp.ClientSession() as session:
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
-        async with session.post(url, json=payload) as resp:
-            res_text = await resp.text()
-            print(f"Odpowiedź Telegram API: {res_text}")
-            return res_text
+        for chunk in chunks:
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk}
+            async with session.post(url, json=payload) as resp:
+                res_text = await resp.text()
+                print(f"Odpowiedź Telegram API: {res_text}")
+            await asyncio.sleep(1)
 
 
 # --- 7. WYSYŁKA HTML NA FTP ---
@@ -722,7 +695,6 @@ async def main():
                 market_data[sym][bar] = d
                 timeframes_raw[bar] = d.get("raw_closes", [])
             
-            # Weryfikacja wzorców historycznych i progresu setupu
             pattern_evaluations[sym] = HistoricalPatternEngine.evaluate_asset_patterns(timeframes_raw)
             
         deriv_data = await fetch_derivatives_and_liquidations(session)
@@ -744,13 +716,7 @@ async def main():
         for item in okx_extremes[:4]:
             okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI(1D): {item['rsi']}\n"
 
-        # 1. Generujemy profesjonalną analizę AI dla Telegrama (dwie wiadomości)
-        part1, part2 = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_summary)
-        await send_telegram(part1)
-        await asyncio.sleep(2)
-        await send_telegram(part2)
-        
-        # 2. Budujemy czyste repozytorium surowych danych w pliku HTML
+        # 1. BUDOWA I WYSYŁKA HTML NA FTP (Zrobione na pierwszym miejscu, żeby strzała serwera zawsze działała)
         html_boxes = ""
         for sym in symbols:
             rows = ""
@@ -884,8 +850,20 @@ async def main():
 </body>
 </html>
 """
-        # 3. Wysłanie zaktualizowanego repozytorium na FTP
         upload_html_to_ftp(html_content)
+
+        # 2. GENEROWANIE I WYSYŁKA ANALIZY AI NA TELEGRAM (W DWÓCH OSOBNYCH ZAPYTANIACH)
+        print("Generowanie Części 1 analizy AI...")
+        part1 = await generate_ai_part1(tech_summary, deriv_data, pattern_summary)
+        await send_telegram(part1)
+        
+        print("Oczekiwanie przed kolejnym zapytaniem do API...")
+        await asyncio.sleep(4)
+        
+        print("Generowanie Części 2 analizy AI (Short Trap)...")
+        part2 = await generate_ai_part2(okx_summary)
+        await send_telegram(part2)
+        
         print("Proces zakończony pomyślnie.")
 
 if __name__ == "__main__":
