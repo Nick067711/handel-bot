@@ -139,7 +139,7 @@ class HistoricalPatternEngine:
         c_1h = timeframes_data.get("1h", [])
         
         if not c_1d or len(c_1d) < 20:
-            return {"pattern_signal": "NEUTRAL", "regime": "UNKNOWN", "notes": "Niewystarczająca historia danych"}
+            return {"pattern_signal": "NEUTRAL", "regime": "UNKNOWN", "setup_progress": 0, "notes": "Niewystarczająca historia danych"}
             
         close_price = c_1d[-1]
         ema200_1d = cls.calculate_ema(c_1d, 200) if len(c_1d) >= 200 else cls.calculate_ema(c_1d, len(c_1d))
@@ -161,6 +161,23 @@ class HistoricalPatternEngine:
         elif 76500 <= close_price <= 78500:
             cost_basis_status = "TEST_TRUE_MARKET_MEAN (~77.5k)"
 
+        # Wyliczenie progresu setupu (0-100%) do pozycji Long/Short
+        progress = 50
+        if regime.startswith("HOSSA"):
+            progress += 20
+            if monthly_macd_turning_up:
+                progress += 15
+            if div_1w == "BYCZA_DYWERGENCJA" or rsi_4h < 40:
+                progress += 15
+            else:
+                progress += 5
+        else:
+            progress = 40
+            if monthly_macd_turning_up:
+                progress += 20
+
+        progress = min(max(progress, 0), 100)
+
         pattern_signal = "NEUTRAL"
         notes = f"Reżim: {regime}. Miesięczny MACD rośnie: {monthly_macd_turning_up}. Cost Basis Zone: {cost_basis_status}."
         
@@ -181,6 +198,7 @@ class HistoricalPatternEngine:
             "monthly_macd_turning_up": monthly_macd_turning_up,
             "cost_basis_status": cost_basis_status,
             "divergences": {"1w": div_1w, "1d": div_1d, "4h": div_4h},
+            "setup_progress": progress,
             "notes": notes
         }
 
@@ -323,7 +341,53 @@ async def fetch_okx_top_extremes(session):
     return results
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & WIELOGIEŁDOWY SKAN PŁYNNOŚCI (BUFOR 10%) ---
+# --- HELPER: KOSZYKOWA AGREGACJA PŁYNNOŚCI ZE WSZYSTKICH GIEŁD ---
+def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
+    bin_size = 500.0 if is_btc else 0.0005
+    token_name = "BTC" if is_btc else "STRK"
+    
+    asks_bins = {}
+    bids_bins = {}
+    
+    for w in walls:
+        p = w["price"]
+        s = w["size"]
+        if w["type"] == "Ask" and current_price <= p <= current_price * 1.10:
+            b_key = int(p / bin_size) * bin_size
+            if b_key not in asks_bins:
+                asks_bins[b_key] = {"token": 0.0, "usd": 0.0}
+            asks_bins[b_key]["token"] += s
+            asks_bins[b_key]["usd"] += s * p
+        elif w["type"] == "Bid" and current_price * 0.90 <= p <= current_price:
+            b_key = int(p / bin_size) * bin_size
+            if b_key not in bids_bins:
+                bids_bins[b_key] = {"token": 0.0, "usd": 0.0}
+            bids_bins[b_key]["token"] += s
+            bids_bins[b_key]["usd"] += s * p
+            
+    best_ask_str = "Brak"
+    best_bid_str = "Brak"
+    
+    if asks_bins:
+        top_ask_key = max(asks_bins, key=lambda k: asks_bins[k]["token"])
+        z_min = top_ask_key
+        z_max = top_ask_key + bin_size
+        tok_val = asks_bins[top_ask_key]["token"]
+        usd_val = asks_bins[top_ask_key]["usd"]
+        best_ask_str = f"${z_min:,.2f} - ${z_max:,.2f} | {tok_val:,.2f} {token_name} (~${usd_val/1e6:,.2f} mln USD)"
+        
+    if bids_bins:
+        top_bid_key = max(bids_bins, key=lambda k: bids_bins[k]["token"])
+        z_min = top_bid_key
+        z_max = top_bid_key + bin_size
+        tok_val = bids_bins[top_bid_key]["token"]
+        usd_val = bids_bins[top_bid_key]["usd"]
+        best_bid_str = f"${z_min:,.2f} - ${z_max:,.2f} | {tok_val:,.2f} {token_name} (~${usd_val/1e6:,.2f} mln USD)"
+        
+    return best_ask_str, best_bid_str
+
+
+# --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -422,7 +486,7 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception as e:
         print(f"Liquidations Bybit error: {e}")
 
-    # Pobieramy bieżącą cenę rynkową BTC z Binance jako punkt odniesienia do bufora 10%
+    # Pobranie cen referencyjnych do bufora 10%
     btc_current_price = 82800.0
     try:
         async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5) as resp:
@@ -432,13 +496,9 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception:
         pass
 
-    lower_bound = btc_current_price * 0.90  # -10%
-    upper_bound = btc_current_price * 1.10  # +10%
-
-    # 8. WIELOGIEŁDOWY SKAN PŁYNNOŚCI BITCOINA (BTC) Z FILTREM 10%
+    # 8. WIELOGIEŁDOWY SKAN PŁYNNOŚCI BTC (OKX, Binance, Bybit, Kraken)
     btc_walls = []
     
-    # OKX BTC
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=400", timeout=8) as resp:
             if resp.status == 200:
@@ -446,74 +506,52 @@ async def fetch_derivatives_and_liquidations(session):
                 data = res.get("data", [])
                 if data:
                     for ask in data[0].get("asks", []):
-                        p, s = float(ask[0]), float(ask[1])
-                        if btc_current_price <= p <= upper_bound:
-                            btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "OKX"})
+                        btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "OKX"})
                     for bid in data[0].get("bids", []):
-                        p, s = float(bid[0]), float(bid[1])
-                        if lower_bound <= p <= btc_current_price:
-                            btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "OKX"})
+                        btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "OKX"})
     except Exception as e:
         print(f"BTC OKX Book error: {e}")
 
-    # Binance BTC
     try:
         async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=500", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
-                    p, s = float(ask[0]), float(ask[1])
-                    if btc_current_price <= p <= upper_bound:
-                        btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Binance"})
+                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Binance"})
                 for bid in res.get("bids", []):
-                    p, s = float(bid[0]), float(bid[1])
-                    if lower_bound <= p <= btc_current_price:
-                        btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Binance"})
+                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Binance"})
     except Exception as e:
         print(f"BTC Binance Book error: {e}")
 
-    # Bybit BTC
     try:
         async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 result = res.get("result", {})
                 for ask in result.get("a", []):
-                    p, s = float(ask[0]), float(ask[1])
-                    if btc_current_price <= p <= upper_bound:
-                        btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Bybit"})
+                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Bybit"})
                 for bid in result.get("b", []):
-                    p, s = float(bid[0]), float(bid[1])
-                    if lower_bound <= p <= btc_current_price:
-                        btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Bybit"})
+                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Bybit"})
     except Exception as e:
         print(f"BTC Bybit Book error: {e}")
 
-    # Kraken BTC
     try:
         async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=100", timeout=8) as resp:
             if resp.status == 200:
                 res = await resp.json()
                 result = res.get("result", {}).get("XXBTZUSDT", {}) or res.get("result", {}).get("XBTUSDT", {})
                 for ask in result.get("asks", []):
-                    p, s = float(ask[0]), float(ask[1])
-                    if btc_current_price <= p <= upper_bound:
-                        btc_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Kraken"})
+                    btc_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Kraken"})
                 for bid in result.get("bids", []):
-                    p, s = float(bid[0]), float(bid[1])
-                    if lower_bound <= p <= btc_current_price:
-                        btc_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Kraken"})
+                    btc_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Kraken"})
     except Exception as e:
         print(f"BTC Kraken Book error: {e}")
 
     if btc_walls:
-        max_btc_ask = max([w for w in btc_walls if w["type"] == "Ask"], key=lambda x: x["size"], default=None)
-        max_btc_bid = max([w for w in btc_walls if w["type"] == "Bid"], key=lambda x: x["size"], default=None)
-        ask_str = f"Ściana Oporu (Ask): ${max_btc_ask['price']:,.2f} ({max_btc_ask['size']:,.2f} BTC na {max_btc_ask['ex']})" if max_btc_ask else "Brak"
-        bid_str = f"Ściana Wsparcia (Bid): ${max_btc_bid['price']:,.2f} ({max_btc_bid['size']:,.2f} BTC na {max_btc_bid['ex']})" if max_btc_bid else "Brak"
-        derivatives_info["liquidation_map_btc"] = f"{ask_str} | {bid_str}"
+        ask_zone, bid_zone = aggregate_baskets_to_zones(btc_walls, btc_current_price, is_btc=True)
+        derivatives_info["liquidation_map_btc"] = f"Strefa Oporu (Ask): {ask_zone} | Strefa Wsparcia (Bid): {bid_zone}"
 
-    # 9. SKAN PŁYNNOŚCI STRK (z buforem 10%)
+    # 9. SKAN PŁYNNOŚCI STRK (z uwzględnieniem wielu giełd)
     strk_current_price = 0.058
     try:
         async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=STRKUSDT", timeout=5) as resp:
@@ -523,9 +561,6 @@ async def fetch_derivatives_and_liquidations(session):
     except Exception:
         pass
 
-    strk_lower = strk_current_price * 0.90
-    strk_upper = strk_current_price * 1.10
-
     strk_walls = []
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=STRK-USDT-SWAP&sz=400", timeout=8) as resp:
@@ -534,13 +569,9 @@ async def fetch_derivatives_and_liquidations(session):
                 data = res.get("data", [])
                 if data:
                     for ask in data[0].get("asks", []):
-                        p, s = float(ask[0]), float(ask[1])
-                        if strk_current_price <= p <= strk_upper:
-                            strk_walls.append({"type": "Ask", "price": p, "size": s, "ex": "OKX"})
+                        strk_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "OKX"})
                     for bid in data[0].get("bids", []):
-                        p, s = float(bid[0]), float(bid[1])
-                        if strk_lower <= p <= strk_current_price:
-                            strk_walls.append({"type": "Bid", "price": p, "size": s, "ex": "OKX"})
+                        strk_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "OKX"})
     except Exception as e:
         print(f"OKX Book scan error: {e}")
 
@@ -549,22 +580,15 @@ async def fetch_derivatives_and_liquidations(session):
             if resp.status == 200:
                 res = await resp.json()
                 for ask in res.get("asks", []):
-                    p, s = float(ask[0]), float(ask[1])
-                    if strk_current_price <= p <= strk_upper:
-                        strk_walls.append({"type": "Ask", "price": p, "size": s, "ex": "Binance"})
+                    strk_walls.append({"type": "Ask", "price": float(ask[0]), "size": float(ask[1]), "ex": "Binance"})
                 for bid in res.get("bids", []):
-                    p, s = float(bid[0]), float(bid[1])
-                    if strk_lower <= p <= strk_current_price:
-                        strk_walls.append({"type": "Bid", "price": p, "size": s, "ex": "Binance"})
+                    strk_walls.append({"type": "Bid", "price": float(bid[0]), "size": float(bid[1]), "ex": "Binance"})
     except Exception as e:
         print(f"Binance Book scan error: {e}")
 
     if strk_walls:
-        max_strk_ask = max([w for w in strk_walls if w["type"] == "Ask"], key=lambda x: x["size"], default=None)
-        max_strk_bid = max([w for w in strk_walls if w["type"] == "Bid"], key=lambda x: x["size"], default=None)
-        s_ask = f"Ściana Ask: ${max_strk_ask['price']} ({max_strk_ask['size']:,.0f} STRK na {max_strk_ask['ex']})" if max_strk_ask else "Brak"
-        s_bid = f"Ściana Bid: ${max_strk_bid['price']} ({max_strk_bid['size']:,.0f} STRK na {max_strk_bid['ex']})" if max_strk_bid else "Brak"
-        derivatives_info["liquidation_map_strk"] = f"{s_ask} | {s_bid}"
+        ask_zone_s, bid_zone_s = aggregate_baskets_to_zones(strk_walls, strk_current_price, is_btc=False)
+        derivatives_info["liquidation_map_strk"] = f"Strefa Ask: {ask_zone_s} | Strefa Bid: {bid_zone_s}"
     else:
         derivatives_info["liquidation_map_strk"] = "Brak danych w pełnym zakresie"
 
@@ -581,35 +605,35 @@ async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_ex
     
     prompt = f"""
 Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor.
-Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W, 1M) z uśrednionych danych z giełd (OKX, Binance, Kraken, Bybit), wyliczone wzorce historyczne oraz dane o instrumentach pochodnych i likwidacjach.
+Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W, 1M), wyliczone sygnały tekniczne i progres sygnału (0-100%), zagregowane strefy płynności z wielu giełd oraz instrumenty pochodne.
 
 BEZWZGLĘDNE ZASADY FORMATOWANIA TELEGRAMA:
 1. ŻADNEGO WSTĘPU. Raport rozpoczyna się od analizy BTC.
 2. BEZWZGLĘDNY ZAKAZ PODAWANIA LICZB/WARTOŚCI WSKAŹNIKÓW w tekście (brak podawania konkretnych liczb RSI, MACD, StochRSI). Użytkownik odczytuje wartości sam z pliku HTML.
 3. AKTYWA TARGETOWE: BTC, STRK (Starknet) oraz S (Sonic / S/USDC). Uwaga: 'S' oznacza Sonic, nie pomył z Solaną (SOL).
-4. Przekaz ma być skondensowany, skupiony wyłącznie na strukturze, reżimie rynkowym, płynności oraz poziomach Long/Short z wielodniowym horyzontem trzymania pozycji (swing).
+4. Przekaz ma być skondensowany, skupiony wyłącznie na strukturze, reżimie rynkowym, strefach płynności oraz ostatecznych wnioskach AI po weryfikacji wszystkich danych.
 
-PRZETORZONE SYGNAŁY WZORCÓW HISTORYCZNYCH:
+STAN TECHNICZNY I PROGRES SYGNAŁÓW (0-100%):
 {pattern_summary}
 
 DANE TECHNICZNE (UŚREDNIONE Z GIEŁD):
 {tech_summary}
 
-TOP SELEKCJA EKSTREMÓW OKX (DANE Z WYKRESU 1D):
+TOP SELEKCJA EKSTREMÓW OKX (1D):
 {okx_extremes}
 
-DANE POCHODNE I LIKWIDACJE:
+ZAGREGOWANE STREFY PŁYNNOŚCI (OKX, Binance, Bybit, Kraken):
+- Zagregowana Mapa Płynności BTC: {deriv_data['liquidation_map_btc']}
+- Zagregowana Mapa Płynności STRK: {deriv_data['liquidation_map_strk']}
 - Open Interest (OKX BTC): {deriv_data['open_interest_okx']}
 - Open Interest (OKX STRK): {deriv_data['open_interest_strk']}
 - Funding Rate (OKX BTC): {deriv_data['funding_rate_okx']}
 - Funding Rate (OKX STRK): {deriv_data['funding_rate_strk']}
-- Wielogiełdowa Mapa Płynności / Ściany BTC (bufor 10%): {deriv_data['liquidation_map_btc']}
-- Wielogiełdowa Mapa Płynności STRK (bufor 10%): {deriv_data['liquidation_map_strk']}
 - Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
-PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJA "Top Selekcja":
-Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając głębokie mapy płynności i ściany zleceń z wielu giełd, S (Sonic).
+PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCjĄ "Top Selekcja":
+Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając zagregowane strefy płynności, S (Sonic).
 Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
 """
     
@@ -700,7 +724,7 @@ async def main():
                 market_data[sym][bar] = d
                 timeframes_raw[bar] = d.get("raw_closes", [])
             
-            # Weryfikacja wzorców historycznych
+            # Weryfikacja wzorców historycznych i progresu setupu
             pattern_evaluations[sym] = HistoricalPatternEngine.evaluate_asset_patterns(timeframes_raw)
             
         deriv_data = await fetch_derivatives_and_liquidations(session)
@@ -716,19 +740,19 @@ async def main():
                 tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Line: {d['macd_line']}, Signal: {d['macd_signal']}, Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}, EMA200: ${d['ema200']}\n"
             
             pat = pattern_evaluations[sym]
-            pattern_summary += f"- {sym}: Reżim: {pat.get('regime')}, Sygnał Wzorca: {pat.get('pattern_signal')}, Notatki: {pat.get('notes')}\n"
+            pattern_summary += f"- {sym}: Reżim: {pat.get('regime')}, Sygnał Wzorca: {pat.get('pattern_signal')}, Progres Setupu: {pat.get('setup_progress')}%, Notatki: {pat.get('notes')}\n"
 
         okx_summary = "Skanowanie OKX Ekstremów 1D:\n"
         for item in okx_extremes[:3]:
             okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI: {item['rsi']}\n"
 
-        # 1. Generujemy profesjonalną analizę AI dla Telegrama (dwie niezależne wiadomości)
+        # 1. Generujemy profesjonalną analizę AI dla Telegrama (dwie wiadomości)
         part1, part2 = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_summary)
         await send_telegram(part1)
         await asyncio.sleep(1)
         await send_telegram(part2)
         
-        # 2. Budujemy czyste, potężne repozytorium surowych danych w pliku HTML (BEZ TEKSTU AI)
+        # 2. Budujemy czyste repozytorium surowych danych w pliku HTML (zawierające sygnały i progres 0-100%)
         html_boxes = ""
         for sym in symbols:
             rows = ""
@@ -750,7 +774,7 @@ async def main():
             pat = pattern_evaluations[sym]
             html_boxes += f"""
             <div class="tech-card">
-                <h3>{sym} — Sygnał Wzorca: <span class="badge">{pat.get('pattern_signal')}</span></h3>
+                <h3>{sym} — Sygnał: <span class="badge">{pat.get('pattern_signal')}</span> | Progres Setupu: <span class="badge" style="color: #40c4ff;">{pat.get('setup_progress')}%</span></h3>
                 <p class="notes"><b>Diagnoza Wzorców Historycznych:</b> {pat.get('notes')}</p>
                 <p class="notes"><b>Dywergencje RSI:</b> 1W: {pat.get('divergences', {}).get('1w')}, 1D: {pat.get('divergences', {}).get('1d')}, 4H: {pat.get('divergences', {}).get('4h')}</p>
                 <table>
@@ -814,7 +838,7 @@ async def main():
         <h1>Market Maker Monitor — Live Analytical Database</h1>
         <p>Data aktualizacji: <b>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</b></p>
         
-        <h2>1. Rynek Pochodnych, Funding Rates & Baza Kosztowa On-Chain</h2>
+        <h2>1. Rynek Pochodnych, Funding Rates & Zagregowane Strefy Płynności</h2>
         <div class="deriv-grid">
             <div class="deriv-card">
                 <span>Open Interest (BTC OKX)</span>
@@ -834,8 +858,8 @@ async def main():
             </div>
         </div>
         <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Wielogiełdowa Mapa Płynności / Ściany BTC (Bufor 10% — OKX, Binance, Bybit, Kraken):</b> {deriv_data['liquidation_map_btc']}</p>
-            <p><b>Wielogiełdowa Mapa Płynności STRK (Bufor 10%):</b> {deriv_data['liquidation_map_strk']}</p>
+            <p><b>Zagregowane Strefy Płynności BTC (OKX, Binance, Bybit, Kraken):</b> {deriv_data['liquidation_map_btc']}</p>
+            <p><b>Zagregowane Strefy Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
             <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
@@ -861,7 +885,7 @@ async def main():
 </body>
 </html>
 """
-        # 3. Wysłanie czystego repozytorium danych na FTP
+        # 3. Wysłanie zaktualizowanego repozytorium na FTP
         upload_html_to_ftp(html_content)
         print("Proces zakończony pomyślnie.")
 
