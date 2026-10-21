@@ -153,6 +153,7 @@ class HistoricalPatternEngine:
         div_1d = cls.detect_multi_timeframe_divergence(c_1d)
         div_4h = cls.detect_multi_timeframe_divergence(c_4h)
         
+        rsi_1d = cls.calculate_rsi(c_1d)
         rsi_4h = cls.calculate_rsi(c_4h) if c_4h else 50.0
         
         cost_basis_status = "NEUTRAL_ZONE"
@@ -161,36 +162,22 @@ class HistoricalPatternEngine:
         elif 76500 <= close_price <= 78500:
             cost_basis_status = "TEST_TRUE_MARKET_MEAN (~77.5k)"
 
-        # Wyliczenie progresu setupu (0-100%) do pozycji Long/Short
-        progress = 50
-        if regime.startswith("HOSSA"):
-            progress += 20
-            if monthly_macd_turning_up:
-                progress += 15
-            if div_1w == "BYCZA_DYWERGENCJA" or rsi_4h < 40:
-                progress += 15
-            else:
-                progress += 5
-        else:
-            progress = 40
-            if monthly_macd_turning_up:
-                progress += 20
-
-        progress = min(max(progress, 0), 100)
+        # Wyliczenie progresu i priorytetu pod Short Traps / wykupienia
+        progress = int(min(max((rsi_1d / 100.0) * 100, 0), 100))
 
         pattern_signal = "NEUTRAL"
-        notes = f"Reżim: {regime}. Miesięczny MACD rośnie: {monthly_macd_turning_up}. Cost Basis Zone: {cost_basis_status}."
+        notes = f"Reżim: {regime}. Miesięczny MACD rośnie: {monthly_macd_turning_up}. RSI(1D): {rsi_1d}."
         
-        if regime.startswith("HOSSA"):
+        if rsi_1d >= 70 or div_1d == "NIEDŹWIEDZIA_DYWERGENCJA":
+            pattern_signal = "POTENTIAL_SHORT_TRAP"
+            notes += " UWAGA: Skrajne wykupienie / Niedźwiedzia dywergencja – idealny kandydat pod Short (pułapka byków)."
+        elif regime.startswith("HOSSA"):
             if monthly_macd_turning_up and (div_1w == "BYCZA_DYWERGENCJA" or cost_basis_status != "NEUTRAL_ZONE" or rsi_4h < 35):
                 pattern_signal = "POTENTIAL_LONG_SETUP"
             else:
                 pattern_signal = "POTENTIAL_LONG_SWING"
         else:
-            if monthly_macd_turning_up:
-                pattern_signal = "POTENTIAL_MACRO_BOTTOM_WATCH"
-            else:
-                pattern_signal = "POTENTIAL_SHORT_SETUP"
+            pattern_signal = "POTENTIAL_SHORT_SETUP"
 
         return {
             "pattern_signal": pattern_signal,
@@ -323,9 +310,9 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. DYNAMICZNY SKAN TOP SELEKCJI OKX (EKSTREMA) ---
+# --- 3. DYNAMICZNY SKAN TOP SELEKCJI OKX (EKSTREMA / SHORT TRAP) ---
 async def fetch_okx_top_extremes(session):
-    symbols = ["SOL", "SUI", "ETH", "AVAX", "LINK", "ADA", "DOGE", "NEAR", "APT"]
+    symbols = ["SOL", "SUI", "ETH", "AVAX", "LINK", "ADA", "DOGE", "NEAR", "APT", "STRK"]
     results = []
     for sym in symbols:
         closes = await fetch_okx_candles(session, sym, "1d")
@@ -335,7 +322,7 @@ async def fetch_okx_top_extremes(session):
                 "symbol": sym,
                 "close": closes[-1],
                 "rsi": rsi,
-                "extreme_score": abs(rsi - 50)
+                "extreme_score": rsi # Priorytet wykupienia pod Short Trap
             })
     results = sorted(results, key=lambda x: x["extreme_score"], reverse=True)
     return results
@@ -387,7 +374,7 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     return best_ask_str, best_bid_str
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI ---
+# --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI (PEŁNY ZE WSZYSTKICH GIEŁD) ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -595,7 +582,7 @@ async def fetch_derivatives_and_liquidations(session):
     return derivatives_info
 
 
-# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI DLA TELEGRAMA Z ROTACJĄ MODELI ---
+# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI DLA TELEGRAMA (ROTAKCJA MODELI I STABILNOŚĆ) ---
 async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_extremes, max_retries=3, initial_delay=5):
     if not GEMINI_API_KEY:
         print("Brak klucza GEMINI_API_KEY.")
@@ -605,21 +592,21 @@ async def generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_ex
     
     prompt = f"""
 Jesteś profesjonalnym analitykiem rynkowym i systemem Market Maker Monitor.
-Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W, 1M), wyliczone sygnały tekniczne i progres sygnału (0-100%), zagregowane strefy płynności z wielu giełd oraz instrumenty pochodne.
+Przygotuj profesjonalny raport handlowy uwzględniający wyższe interwały (1h, 4h, 1D, 1W, 1M), wyliczone sygnały techniczne i progres/wykupienie, zagregowane strefy płynności z wielu giełd oraz instrumenty pochodne ze szczególnym uwzględnieniem polowania na shorty (Short Trap).
 
 BEZWZGLĘDNE ZASADY FORMATOWANIA TELEGRAMA:
 1. ŻADNEGO WSTĘPU. Raport rozpoczyna się od analizy BTC.
 2. BEZWZGLĘDNY ZAKAZ PODAWANIA LICZB/WARTOŚCI WSKAŹNIKÓW w tekście (brak podawania konkretnych liczb RSI, MACD, StochRSI). Użytkownik odczytuje wartości sam z pliku HTML.
 3. AKTYWA TARGETOWE: BTC, STRK (Starknet) oraz S (Sonic / S/USDC). Uwaga: 'S' oznacza Sonic, nie pomył z Solaną (SOL).
-4. Przekaz ma być skondensowany, skupiony wyłącznie na strukturze, reżimie rynkowym, strefach płynności oraz ostatecznych wnioskach AI po weryfikacji wszystkich danych.
+4. Przekaz ma być skondensowany, skupiony na strukturze, reżimie rynkowym, strefach płynności oraz ostatecznych wnioskach AI pod kątem Short Trap.
 
-STAN TECHNICZNY I PROGRES SYGNAŁÓW (0-100%):
+STAN TECHNICZNY I PROGRES SYGNAŁÓW:
 {pattern_summary}
 
 DANE TECHNICZNE (UŚREDNIONE Z GIEŁD):
 {tech_summary}
 
-TOP SELEKCJA EKSTREMÓW OKX (1D):
+TOP SELEKCJA EKSTREMÓW / WYKUPIEŃ OKX (1D - SHORT TRAP TARGETS):
 {okx_extremes}
 
 ZAGREGOWANE STREFY PŁYNNOŚCI (OKX, Binance, Bybit, Kraken):
@@ -632,9 +619,9 @@ ZAGREGOWANE STREFY PŁYNNOŚCI (OKX, Binance, Bybit, Kraken):
 - Monitor Likwidacji / Presja (Bybit BTC): {deriv_data['liquidations_bybit']}
 - Baza Kosztowa (Cost Basis): {deriv_data['realized_price']}
 
-PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCjĄ "Top Selekcja":
+PODZIEL RAPORT NA DWIE CZĘŚCI ROZDZIELONE SEKCJĄ "Top Selekcja":
 Część 1: Kondycja Rynku, BTC, STRK (Starknet) uwzględniając zagregowane strefy płynności, S (Sonic).
-Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym Entry, SL, TP).
+Część 2: Top Selekcja Short Trap (wykupione projekty z potencjałem gwałtownego spadku z OKX).
 """
     
     candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
@@ -652,7 +639,7 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
                     text = response.text.strip()
                     parts = text.split("Top Selekcja")
                     part1 = parts[0].strip()
-                    part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Altcoinowa z OKX: Brak dodatkowych wskazań."
+                    part2 = ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Short Trap: Brak dodatkowych wskazań."
                     return part1, part2
             except APIError as e:
                 print(f"Ostrzeżenie API Gemini {model_name}: {e}")
@@ -663,7 +650,18 @@ Część 2: Top Selekcja Altcoinowa z OKX (2-3 najlepsze układy z precyzyjnym E
                 await asyncio.sleep(delay)
                 delay *= 2
 
-    return "Błąd generowania analizy przez AI (limity/przeciążenie API Gemini).", "Spróbuj ponownie później."
+    # Jeśli modele zawiodą po wszystkich próbach, wykonujemy powtórne zapytanie z dłuższą przerwą na domyślnym modelu
+    await asyncio.sleep(10)
+    try:
+        response = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        if response and response.text:
+            text = response.text.strip()
+            parts = text.split("Top Selekcja")
+            return parts[0].strip(), ("Top Selekcja" + parts[1]) if len(parts) > 1 else "Top Selekcja Short Trap"
+    except Exception as ex:
+        print(f"Ostateczny awaryjny ratunek API: {ex}")
+
+    return "Błąd generowania analizy przez AI (chwilowy limit API, sprawdź plik HTML na stronie).", "Top Selekcja Short Trap: Brak danych."
 
 
 # --- 6. WYSYŁKA NA TELEGRAM ---
@@ -740,19 +738,19 @@ async def main():
                 tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Line: {d['macd_line']}, Signal: {d['macd_signal']}, Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}, EMA200: ${d['ema200']}\n"
             
             pat = pattern_evaluations[sym]
-            pattern_summary += f"- {sym}: Reżim: {pat.get('regime')}, Sygnał Wzorca: {pat.get('pattern_signal')}, Progres Setupu: {pat.get('setup_progress')}%, Notatki: {pat.get('notes')}\n"
+            pattern_summary += f"- {sym}: Reżim: {pat.get('regime')}, Sygnał: {pat.get('pattern_signal')}, Wskaźnik Wykupienia: {pat.get('setup_progress')}%, Notatki: {pat.get('notes')}\n"
 
-        okx_summary = "Skanowanie OKX Ekstremów 1D:\n"
-        for item in okx_extremes[:3]:
-            okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI: {item['rsi']}\n"
+        okx_summary = "Skanowanie OKX Ekstremów / Wykupień 1D (Short Trap):\n"
+        for item in okx_extremes[:4]:
+            okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI(1D): {item['rsi']}\n"
 
         # 1. Generujemy profesjonalną analizę AI dla Telegrama (dwie wiadomości)
         part1, part2 = await generate_ai_analysis(tech_summary, deriv_data, pattern_summary, okx_summary)
         await send_telegram(part1)
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
         await send_telegram(part2)
         
-        # 2. Budujemy czyste repozytorium surowych danych w pliku HTML (zawierające sygnały i progres 0-100%)
+        # 2. Budujemy czyste repozytorium surowych danych w pliku HTML
         html_boxes = ""
         for sym in symbols:
             rows = ""
@@ -774,7 +772,7 @@ async def main():
             pat = pattern_evaluations[sym]
             html_boxes += f"""
             <div class="tech-card">
-                <h3>{sym} — Sygnał: <span class="badge">{pat.get('pattern_signal')}</span> | Progres Setupu: <span class="badge" style="color: #40c4ff;">{pat.get('setup_progress')}%</span></h3>
+                <h3>{sym} — Sygnał: <span class="badge">{pat.get('pattern_signal')}</span> | Wskaźnik Wykupienia: <span class="badge" style="color: #ff5252;">{pat.get('setup_progress')}%</span></h3>
                 <p class="notes"><b>Diagnoza Wzorców Historycznych:</b> {pat.get('notes')}</p>
                 <p class="notes"><b>Dywergencje RSI:</b> 1W: {pat.get('divergences', {}).get('1w')}, 1D: {pat.get('divergences', {}).get('1d')}, 4H: {pat.get('divergences', {}).get('4h')}</p>
                 <table>
@@ -799,12 +797,13 @@ async def main():
 
         okx_box_rows = ""
         for item in okx_extremes:
+            score_val = item["extreme_score"] if "extreme_score" in item else item["rsi"]
             okx_box_rows += f'''
             <tr>
                 <td><b>{item["symbol"]}</b></td>
                 <td>${item["close"]}</td>
                 <td>{item["rsi"]}</td>
-                <td>{item["extreme_score"]:.2f}</td>
+                <td>{score_val:.2f}</td>
             </tr>
             '''
 
@@ -813,16 +812,16 @@ async def main():
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Maker Monitor — Repozytorium Analityczne</title>
+    <title>Market Maker Monitor — Repozytorium Short Trap & Płynność</title>
     <style>
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f1115; color: #e1e1e6; margin: 0; padding: 25px; line-height: 1.6; }}
         .container {{ max-width: 1100px; margin: 0 auto; background: #16181d; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
-        h1 {{ color: #00e676; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
+        h1 {{ color: #ff5252; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
         h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
         h3 {{ color: #ffab40; margin-top: 20px; }}
-        .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #00e676; }}
+        .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #ff5252; }}
         .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
-        .badge {{ background: #232730; color: #00e676; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
+        .badge {{ background: #232730; color: #ff5252; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88em; }}
         th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2e39; }}
         th {{ background-color: #0f1115; color: #8892b0; font-weight: 600; }}
@@ -835,7 +834,7 @@ async def main():
 </head>
 <body>
     <div class="container">
-        <h1>Market Maker Monitor — Live Analytical Database</h1>
+        <h1>Market Maker Monitor — Short Trap & Live Database</h1>
         <p>Data aktualizacji: <b>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</b></p>
         
         <h2>1. Rynek Pochodnych, Funding Rates & Zagregowane Strefy Płynności</h2>
@@ -864,14 +863,14 @@ async def main():
             <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
         </div>
 
-        <h2>2. Skan Ekstremów Płynnościowych OKX (Wszystkie monitorowane altcoiny 1D)</h2>
+        <h2>2. Skan Ekstremów Płynnościowych / Wykupień OKX (Kandydati Short Trap 1D)</h2>
         <table>
             <thead>
                 <tr>
                     <th>Symbol</th>
                     <th>Cena ($)</th>
                     <th>RSI (1D)</th>
-                    <th>Wskaźnik Odchylenia (Extreme Score)</th>
+                    <th>Wynik Wykupienia (Extreme Score)</th>
                 </tr>
             </thead>
             <tbody>
