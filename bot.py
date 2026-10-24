@@ -375,13 +375,8 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
 
 # --- SPECJALNA FUNKCJA: GŁĘBOKI SKAN PŁYNNOŚCI NEAR DO POZIOMU 1.5 ---
 async def fetch_near_deep_liquidation_zones(session):
-    """
-    Pobiera głęboki arkusz zleceń dla NEAR aż do poziomu 1.5 USD,
-    grupując zlecenia w koszyki (np. co 0.1 USD), aby wykryć luki płynnościowe 
-    oraz kluczowe ściany / opory / wsparcia po drodze.
-    """
     near_walls = []
-    current_price = 4.392  # przybliżona cena bazowa
+    current_price = 4.392
     try:
         async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=NEARUSDT", timeout=5) as resp:
             if resp.status == 200:
@@ -390,7 +385,6 @@ async def fetch_near_deep_liquidation_zones(session):
     except Exception:
         pass
 
-    # Pobieranie orderbooka z Binance (maksymalny limit depth)
     try:
         async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=5000", timeout=10) as resp:
             if resp.status == 200:
@@ -403,7 +397,6 @@ async def fetch_near_deep_liquidation_zones(session):
     except Exception as e:
         print(f"NEAR Deep Depth Binance error: {e}")
 
-    # Pobieranie z OKX
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=400", timeout=8) as resp:
             if resp.status == 200:
@@ -418,7 +411,6 @@ async def fetch_near_deep_liquidation_zones(session):
     except Exception as e:
         print(f"NEAR Deep Depth OKX error: {e}")
 
-    # Agregacja do koszykówek co 0.1 USD aż do poziomu 1.5 USD
     bin_size = 0.1
     bins = {}
     for w in near_walls:
@@ -430,7 +422,6 @@ async def fetch_near_deep_liquidation_zones(session):
         bins[b_key]["token"] += s
         bins[b_key]["usd"] += s * p
 
-    # Analiza luk płynnościowych (poziomy, gdzie wolumen tokenów spada blisko zera)
     significant_walls = []
     liquidity_gaps = []
     
@@ -440,9 +431,9 @@ async def fetch_near_deep_liquidation_zones(session):
 
     for b in sorted_bins:
         tok = bins[b]["token"]
-        if tok > 10000:  # Próg istotnej ściany płynności / wsparcia
+        if tok > 10000:
             significant_walls.append(f"${b:,.2f}: {tok:,.2f} NEAR (~${bins[b]['usd']/1e3:,.1f}k)")
-        elif tok < 1000:  # Luka płynnościowa (brak zleceń obronnych)
+        elif tok < 1000:
             liquidity_gaps.append(f"${b:,.2f}")
 
     report_text = f"--- GŁĘBOKA ANALIZA PŁYNNOŚCI NEAR (od obecnej ceny do $1.5) ---\n"
@@ -648,13 +639,12 @@ async def fetch_derivatives_and_liquidations(session):
     else:
         derivatives_info["liquidation_map_strk"] = "Brak danych w pełnym zakresie"
 
-    # Pobranie głębokiego skanu NEAR do 1.5 USD
     derivatives_info["near_deep_liquidation"] = await fetch_near_deep_liquidation_zones(session)
 
     return derivatives_info
 
 
-# --- 5. ROZBITE, LEKKIE ZAPYTANIA DO AI (CZĘŚĆ 1 ORAZ CZĘŚĆ 2) ---
+# --- 5. ROZBITE, LEKKIE ZAPYTANIA DO AI ---
 async def generate_ai_part1(tech_summary, deriv_data, pattern_summary):
     if not GEMINI_API_KEY:
         return "Brak klucza API Gemini."
@@ -716,7 +706,7 @@ DANE EKSTREMÓW OKX (SHORT TRAP TARGETS):
     return "Top Selekcja Short Trap: Brak danych z API."
 
 
-# --- 6. WYSYŁKA NA TELEGRAM (Z PODZIAŁEM NA CHUNKI > 4096 ZNAKÓW) ---
+# --- 6. WYSYŁKA NA TELEGRAM ---
 async def send_telegram(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print("Brak danych konfiguracyjnych Telegrama.")
@@ -800,14 +790,12 @@ async def main():
         for item in okx_extremes[:4]:
             okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI(1D): {item['rsi']}\n"
 
-        # Generowanie raportu tekstowego do wysyłki na Telegram
         part1 = await generate_ai_part1(tech_summary, deriv_data, pattern_summary)
         part2 = await generate_ai_part2(okx_summary)
         full_report = f"📊 **RAPORT RYNKOWY SHORT TRAP**\n\n{part1}\n\n{part2}\n\n🔍 **Głęboka Płynność NEAR do $1.5:**\n{deriv_data['near_deep_liquidation']}"
 
         await send_telegram(full_report)
 
-        # Generowanie HTML do publikacji na FTP
         html_boxes = ""
         for sym in symbols:
             rows = ""
@@ -868,7 +856,7 @@ async def main():
         
         <h2>1. Analiza Głęboka Płynności NEAR (do $1.5)</h2>
         <div class="tech-card" style="border-left-color: #40c4ff;">
-            <pre style="white-space: pre-wrap; font-family: inherit;">{deriv_data['near_deep_liquidation']}</pre>
+            <pre style="white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: #e1e1e6;">{deriv_data['near_deep_liquidation']}</pre>
         </div>
 
         <h2>2. Wskaźniki Techniczne i Reżim Rynkowy</h2>
