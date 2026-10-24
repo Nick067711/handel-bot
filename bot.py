@@ -373,6 +373,86 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     return best_ask_str, best_bid_str
 
 
+# --- SPECJALNA FUNKCJA: GŁĘBOKI SKAN PŁYNNOŚCI NEAR DO POZIOMU 1.5 ---
+async def fetch_near_deep_liquidation_zones(session):
+    """
+    Pobiera głęboki arkusz zleceń dla NEAR aż do poziomu 1.5 USD,
+    grupując zlecenia w koszyki (np. co 0.1 USD), aby wykryć luki płynnościowe 
+    oraz kluczowe ściany / opory / wsparcia po drodze.
+    """
+    near_walls = []
+    current_price = 4.392  # przybliżona cena bazowa
+    try:
+        async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=NEARUSDT", timeout=5) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                current_price = float(res.get("price", 4.392))
+    except Exception:
+        pass
+
+    # Pobieranie orderbooka z Binance (maksymalny limit depth)
+    try:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=5000", timeout=10) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                for bid in res.get("bids", []):
+                    p = float(bid[0])
+                    s = float(bid[1])
+                    if 1.5 <= p <= current_price:
+                        near_walls.append({"price": p, "size": s})
+    except Exception as e:
+        print(f"NEAR Deep Depth Binance error: {e}")
+
+    # Pobieranie z OKX
+    try:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=400", timeout=8) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                data = res.get("data", [])
+                if data:
+                    for bid in data[0].get("bids", []):
+                        p = float(bid[0])
+                        s = float(bid[1])
+                        if 1.5 <= p <= current_price:
+                            near_walls.append({"price": p, "size": s})
+    except Exception as e:
+        print(f"NEAR Deep Depth OKX error: {e}")
+
+    # Agregacja do koszykówek co 0.1 USD aż do poziomu 1.5 USD
+    bin_size = 0.1
+    bins = {}
+    for w in near_walls:
+        p = w["price"]
+        s = w["size"]
+        b_key = round(int(p / bin_size) * bin_size, 2)
+        if b_key not in bins:
+            bins[b_key] = {"token": 0.0, "usd": 0.0}
+        bins[b_key]["token"] += s
+        bins[b_key]["usd"] += s * p
+
+    # Analiza luk płynnościowych (poziomy, gdzie wolumen tokenów spada blisko zera)
+    significant_walls = []
+    liquidity_gaps = []
+    
+    sorted_bins = sorted(bins.keys(), reverse=True)
+    if not sorted_bins:
+        return "Brak danych głębokich dla NEAR w zakresie do $1.5."
+
+    for b in sorted_bins:
+        tok = bins[b]["token"]
+        if tok > 10000:  # Próg istotnej ściany płynności / wsparcia
+            significant_walls.append(f"${b:,.2f}: {tok:,.2f} NEAR (~${bins[b]['usd']/1e3:,.1f}k)")
+        elif tok < 1000:  # Luka płynnościowa (brak zleceń obronnych)
+            liquidity_gaps.append(f"${b:,.2f}")
+
+    report_text = f"--- GŁĘBOKA ANALIZA PŁYNNOŚCI NEAR (od obecnej ceny do $1.5) ---\n"
+    report_text += f"Znaczące ściany wsparcia po drodze:\n" + "\n".join(significant_walls[:10]) + "\n"
+    if liquidity_gaps:
+        report_text += f"Potencjalne Luki Płynnościowe (szybki zjazd ceny bez oporu):\n" + ", ".join(liquidity_gaps[:10]) + "\n"
+    
+    return report_text
+
+
 # --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
@@ -385,6 +465,7 @@ async def fetch_derivatives_and_liquidations(session):
         "liquidations_bybit": "Brak danych (stabilny przepływ)",
         "liquidation_map_btc": "Brak danych w pełnym zakresie",
         "liquidation_map_strk": "Brak danych w pełnym zakresie",
+        "near_deep_liquidation": "Brak danych",
         "realized_price": "US Spot ETF Cost Basis: ~81.5k USD | True Market Mean: ~77.5k USD | Short-Term Holder: ~74.6k USD"
     }
     
@@ -567,6 +648,9 @@ async def fetch_derivatives_and_liquidations(session):
     else:
         derivatives_info["liquidation_map_strk"] = "Brak danych w pełnym zakresie"
 
+    # Pobranie głębokiego skanu NEAR do 1.5 USD
+    derivatives_info["near_deep_liquidation"] = await fetch_near_deep_liquidation_zones(session)
+
     return derivatives_info
 
 
@@ -577,11 +661,11 @@ async def generate_ai_part1(tech_summary, deriv_data, pattern_summary):
     
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
-Jesteś profesjonalnym analitykiem rynkowym. Przygotuj Część 1 raportu (Kondycja Rynku, BTC, STRK, S) na podstawie poniższych danych.
+Jesteś profesjonalnym analitykiem rynkowym. Przygotuj Część 1 raportu (Kondycja Rynku, BTC, STRK, S, oraz Głęboka Płynność NEAR do 1.5 USD) na podstawie poniższych danych.
 BEZWZGLĘDNE ZASADY:
 1. Brak wstępów.
 2. Zakaz podawania dokładnych wartości liczb wskaźników (RSI, MACD) w tekście.
-3. Skup się na strukturze, reżimie i strefach płynności.
+3. Skup się na strukturze, reżimie, strefach płynności oraz sprawdź czy NEAR ma luki płynnościowe w drodze do 1.5.
 
 STAN TECHNICZNY I WZORCE:
 {pattern_summary}
@@ -589,6 +673,7 @@ STAN TECHNICZNY I WZORCE:
 ZAGREGOWANE STREFY PŁYNNOŚCI I POCHODNE:
 - BTC Płynność: {deriv_data['liquidation_map_btc']}
 - STRK Płynność: {deriv_data['liquidation_map_strk']}
+- NEAR Płynność i Luki do $1.5: {deriv_data['near_deep_liquidation']}
 - OI BTC: {deriv_data['open_interest_okx']} | OI STRK: {deriv_data['open_interest_strk']}
 - Funding Rates: BTC {deriv_data['funding_rate_okx']} | STRK {deriv_data['funding_rate_strk']}
 - Baza Kosztowa: {deriv_data['realized_price']}
@@ -638,7 +723,6 @@ async def send_telegram(text):
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     
-    # Podział na chunki o maksymalnej długości 4000 znaków
     max_len = 4000
     chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
     
@@ -716,75 +800,58 @@ async def main():
         for item in okx_extremes[:4]:
             okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI(1D): {item['rsi']}\n"
 
-        # 1. BUDOWA I WYSYŁKA HTML NA FTP (Zrobione na pierwszym miejscu, żeby strzała serwera zawsze działała)
+        # Generowanie raportu tekstowego do wysyłki na Telegram
+        part1 = await generate_ai_part1(tech_summary, deriv_data, pattern_summary)
+        part2 = await generate_ai_part2(okx_summary)
+        full_report = f"📊 **RAPORT RYNKOWY SHORT TRAP**\n\n{part1}\n\n{part2}\n\n🔍 **Głęboka Płynność NEAR do $1.5:**\n{deriv_data['near_deep_liquidation']}"
+
+        await send_telegram(full_report)
+
+        # Generowanie HTML do publikacji na FTP
         html_boxes = ""
         for sym in symbols:
             rows = ""
             for bar in ["1h", "4h", "1d", "1w", "1M"]:
                 d = market_data[sym][bar]
-                rows += f'''
+                rows += f"""
                 <tr>
-                    <td><b>{bar.upper()}</b></td>
-                    <td>${d["close"]}</td>
-                    <td>{d["rsi"]}</td>
-                    <td>{d["stoch_k"]}</td>
-                    <td>{d["macd_line"]} / {d["macd_signal"]} ({d["macd_hist"]})</td>
-                    <td>${d["ema20"]}</td>
-                    <td>${d["ema50"]}</td>
-                    <td>${d["ema200"]}</td>
+                    <td><b>{bar}</b></td>
+                    <td>${d['close']}</td>
+                    <td>{d['rsi']}</td>
+                    <td>{d['stoch_k']}</td>
+                    <td>{d['macd_line']} / {d['macd_signal']} ({d['macd_hist']})</td>
+                    <td>${d['ema20']}</td>
+                    <td>${d['ema50']}</td>
+                    <td>${d['ema200']}</td>
                 </tr>
-                '''
-            
+                """
             pat = pattern_evaluations[sym]
             html_boxes += f"""
             <div class="tech-card">
-                <h3>{sym} — Sygnał: <span class="badge">{pat.get('pattern_signal')}</span> | Wskaźnik Wykupienia: <span class="badge" style="color: #ff5252;">{pat.get('setup_progress')}%</span></h3>
-                <p class="notes"><b>Diagnoza Wzorców Historycznych:</b> {pat.get('notes')}</p>
-                <p class="notes"><b>Dywergencje RSI:</b> 1W: {pat.get('divergences', {}).get('1w')}, 1D: {pat.get('divergences', {}).get('1d')}, 4H: {pat.get('divergences', {}).get('4h')}</p>
+                <h3>{sym} — Sygnał: <span class="badge">{pat.get('pattern_signal')}</span> | Wykupienie: <span class="badge" style="color: #ff5252;">{pat.get('setup_progress')}%</span></h3>
+                <p class="notes">{pat.get('notes')}</p>
                 <table>
                     <thead>
                         <tr>
-                            <th>Interwał</th>
-                            <th>Cena Zamknięcia</th>
-                            <th>RSI (14)</th>
-                            <th>StochRSI K</th>
-                            <th>MACD (Line / Signal / Hist)</th>
-                            <th>EMA 20</th>
-                            <th>EMA 50</th>
-                            <th>EMA 200</th>
+                            <th>Interwał</th><th>Cena Zamknięcia</th><th>RSI</th><th>StochRSI K</th><th>MACD</th><th>EMA 20</th><th>EMA 50</th><th>EMA 200</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {rows}
-                    </tbody>
+                    <tbody>{rows}</tbody>
                 </table>
             </div>
             """
-
-        okx_box_rows = ""
-        for item in okx_extremes:
-            score_val = item["extreme_score"] if "extreme_score" in item else item["rsi"]
-            okx_box_rows += f'''
-            <tr>
-                <td><b>{item["symbol"]}</b></td>
-                <td>${item["close"]}</td>
-                <td>{item["rsi"]}</td>
-                <td>{score_val:.2f}</td>
-            </tr>
-            '''
 
         html_content = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Maker Monitor — Repozytorium Short Trap & Płynność</title>
+    <title>Market Maker Monitor — Analiza Głęboka Płynności NEAR</title>
     <style>
         body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f1115; color: #e1e1e6; margin: 0; padding: 25px; line-height: 1.6; }}
         .container {{ max-width: 1100px; margin: 0 auto; background: #16181d; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
         h1 {{ color: #ff5252; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
         h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
-        h3 {{ color: #ffab40; margin-top: 20px; }}
         .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #ff5252; }}
         .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
         .badge {{ background: #232730; color: #ff5252; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
@@ -792,79 +859,25 @@ async def main():
         th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2e39; }}
         th {{ background-color: #0f1115; color: #8892b0; font-weight: 600; }}
         tr:hover {{ background-color: #232730; }}
-        .deriv-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; margin-top: 15px; }}
-        .deriv-card {{ background: #1a1d24; padding: 15px; border-radius: 6px; border: 1px solid #232730; }}
-        .deriv-card span {{ display: block; font-size: 0.8em; color: #8892b0; }}
-        .deriv-card strong {{ font-size: 1.1em; color: #00e676; }}
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Market Maker Monitor — Short Trap & Live Database</h1>
+        <h1>Market Maker Monitor — Głęboka Płynność i Luki NEAR</h1>
         <p>Data aktualizacji: <b>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</b></p>
         
-        <h2>1. Rynek Pochodnych, Funding Rates & Zagregowane Strefy Płynności</h2>
-        <div class="deriv-grid">
-            <div class="deriv-card">
-                <span>Open Interest (BTC OKX)</span>
-                <strong>{deriv_data['open_interest_okx']}</strong>
-            </div>
-            <div class="deriv-card">
-                <span>Open Interest (STRK OKX)</span>
-                <strong>{deriv_data['open_interest_strk']}</strong>
-            </div>
-            <div class="deriv-card">
-                <span>Funding Rate (BTC OKX)</span>
-                <strong>{deriv_data['funding_rate_okx']}</strong>
-            </div>
-            <div class="deriv-card">
-                <span>Funding Rate (STRK OKX)</span>
-                <strong>{deriv_data['funding_rate_strk']}</strong>
-            </div>
-        </div>
-        <div class="tech-card" style="border-left-color: #40c4ff; margin-top: 20px;">
-            <p><b>Zagregowane Strefy Płynności BTC (OKX, Binance, Bybit, Kraken):</b> {deriv_data['liquidation_map_btc']}</p>
-            <p><b>Zagregowane Strefy Płynności STRK:</b> {deriv_data['liquidation_map_strk']}</p>
-            <p><b>Presja Likwidacyjna & Duże Zlecenia (Bybit BTC):</b> {deriv_data['liquidations_bybit']}</p>
-            <p><b>Poziomy Bazy Kosztowej (Cost Basis):</b> {deriv_data['realized_price']}</p>
+        <h2>1. Analiza Głęboka Płynności NEAR (do $1.5)</h2>
+        <div class="tech-card" style="border-left-color: #40c4ff;">
+            <pre style="white-space: pre-wrap; font-family: inherit;">{deriv_data['near_deep_liquidation']}</pre>
         </div>
 
-        <h2>2. Skan Ekstremów Płynnościowych / Wykupień OKX (Kandydati Short Trap 1D)</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>Symbol</th>
-                    <th>Cena ($)</th>
-                    <th>RSI (1D)</th>
-                    <th>Wynik Wykupienia (Extreme Score)</th>
-                </tr>
-            </thead>
-            <tbody>
-                {okx_box_rows}
-            </tbody>
-        </table>
-
-        <h2>3. Pełne Zestawienie Wskaźników Technicznych z 4 Giełd (OKX, Binance, Kraken, Bybit)</h2>
+        <h2>2. Wskaźniki Techniczne i Reżim Rynkowy</h2>
         {html_boxes}
     </div>
 </body>
-</html>
-"""
-        upload_html_to_ftp(html_content)
+</html>"""
 
-        # 2. GENEROWANIE I WYSYŁKA ANALIZY AI NA TELEGRAM (W DWÓCH OSOBNYCH ZAPYTANIACH)
-        print("Generowanie Części 1 analizy AI...")
-        part1 = await generate_ai_part1(tech_summary, deriv_data, pattern_summary)
-        await send_telegram(part1)
-        
-        print("Oczekiwanie przed kolejnym zapytaniem do API...")
-        await asyncio.sleep(4)
-        
-        print("Generowanie Części 2 analizy AI (Short Trap)...")
-        part2 = await generate_ai_part2(okx_summary)
-        await send_telegram(part2)
-        
-        print("Proces zakończony pomyślnie.")
+        upload_html_to_ftp(html_content)
 
 if __name__ == "__main__":
     asyncio.run(main())
