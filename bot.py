@@ -1,4 +1,5 @@
 import os
+import json
 import ftplib
 import asyncio
 import aiohttp
@@ -15,6 +16,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
 FTP_USER = os.getenv("FTP_USER", "")
 FTP_PASS = os.getenv("FTP_PASS", "")
+
+# Instrumenty do 2-letniej analizy historycznej 1h
+HISTORICAL_INSTRUMENTS = {
+    "BTC": "BTC-USDT-SWAP",
+    "NEAR": "NEAR-USDT-SWAP",
+    "S": "S-USDT-SWAP"
+}
 
 
 # --- 1. PEŁNY SILNIK ANALIZY TECHNICZNEJ I WZORCÓW HISTORYCZNYCH ---
@@ -205,6 +213,59 @@ async def fetch_okx_candles(session, symbol, bar):
     except Exception as e:
         print(f"OKX Fetch error ({symbol} {bar}): {e}")
     return None
+
+
+async def fetch_okx_historical_candles_2years(session, symbol, bar="1H"):
+    """
+    Pobiera pełne dane historyczne świec (ts, o, h, l, c, vol) z ostatnich 2 lat
+    dla wskazanego instrumentu OKX i zwraca listę surowych świec.
+    """
+    inst_id = HISTORICAL_INSTRUMENTS.get(symbol, f"{symbol}-USDT-SWAP")
+    all_candles = []
+    two_years_ms = 2 * 365 * 24 * 3600 * 1000
+    end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
+    start_target = end_time - two_years_ms
+    
+    current_after = None
+    url_history = "https://www.okx.com/api/v5/market/history-candles"
+    
+    print(f"Rozpoczynam 2-letnie pobieranie historyczne 1h dla {symbol}...")
+
+    while True:
+        params = {"instId": inst_id, "bar": bar, "limit": "100"}
+        if current_after:
+            params["after"] = current_after
+
+        try:
+            async with session.get(url_history, params=params, timeout=10) as resp:
+                if resp.status != 200:
+                    break
+                data = await resp.json()
+                
+                if data.get("code") != "0" or not data.get("data"):
+                    break
+                    
+                candles = data["data"]
+                if not candles:
+                    break
+                    
+                all_candles.extend(candles)
+                current_after = candles[-1][0]
+                oldest_timestamp = int(candles[-1][0])
+                
+                if oldest_timestamp <= start_target:
+                    print(f"Osiągnięto horyzont 2 lat dla {symbol}.")
+                    break
+                    
+                await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"Błąd paginacji historycznej OKX ({symbol}): {e}")
+            break
+
+    all_candles.sort(key=lambda x: int(x[0]))
+    print(f"Zakończono pobieranie historyczne dla {symbol}. Łącznie świec: {len(all_candles)}")
+    return all_candles
+
 
 async def fetch_binance_candles(session, symbol, bar):
     bar_map = {"1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w", "1M": "1M"}
@@ -655,7 +716,7 @@ Jesteś profesjonalnym analitykiem rynkowym. Przygotuj Część 1 raportu (Kondy
 BEZWZGLĘDNE ZASADY:
 1. Brak wstępów.
 2. Zakaz podawania dokładnych wartości liczb wskaźników (RSI, MACD) w tekście.
-3. Skup się na strukturze, reżimie, strefach płynności oraz sprawdź czy NEAR ma luki płynnościowe w drodze do 1.5.
+3. Skup się na strukturze, reżimie, strefach płynności oraz sprawdź czy NEAR ha luki płynnościowe w drodze do 1.5.
 
 STAN TECHNICZNY I WZORCE:
 {pattern_summary}
@@ -718,154 +779,87 @@ async def send_telegram(text):
     
     async with aiohttp.ClientSession() as session:
         for chunk in chunks:
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk}
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "Markdown"}
             async with session.post(url, json=payload) as resp:
                 res_text = await resp.text()
                 print(f"Odpowiedź Telegram API: {res_text}")
             await asyncio.sleep(1)
 
 
-# --- 7. WYSYŁKA HTML NA FTP ---
-def upload_html_to_ftp(html_content):
+# --- 7. WYSYŁKA HTML NA FTP (ZAWIERAJĄCY DANE ŚWIECOWE W JSON) ---
+def upload_html_to_ftp(html_content, historical_data):
     if not FTP_USER or not FTP_PASS:
         print("Brak danych logowania do FTP.")
-        return
+        return False
     try:
-        with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
-            try:
-                ftp.cwd("domains/piwecki.pl/public_html/analiza")
-            except ftplib.error_perm:
-                try:
-                    ftp.cwd("domains/piwecki.pl/public_html")
-                    ftp.mkd("analiza")
-                    ftp.cwd("analiza")
-                except Exception as ex:
-                    print(f"FTP Subdirectory creation error: {ex}")
-            
-            with open("index.html", "w", encoding="utf-8") as f:
-                f.write(html_content)
-                
-            with open("index.html", "rb") as f:
-                ftp.storbinary("STOR index.html", f)
-            print("Pomyślnie wysłano czyste repozytorium danych na FTP (piwecki.pl/analiza).")
-    except Exception as e:
-        print(f"Błąd przesyłania FTP: {e}")
-
-
-# --- 8. GŁÓWNA PĘTLA PROGRAMU ---
-async def main():
-    async with aiohttp.ClientSession() as session:
-        intervals = ["1h", "4h", "1d", "1w", "1M"]
-        symbols = ["BTC", "STRK", "S", "SUI"]
+        # Serializacja 2-letnich danych historycznych do JSON
+        json_data = json.dumps(historical_data, ensure_ascii=False)
         
-        market_data = {}
-        pattern_evaluations = {}
-
-        for sym in symbols:
-            market_data[sym] = {}
-            timeframes_raw = {}
-            for bar in intervals:
-                d = await fetch_aggregated_market_data(session, sym, bar)
-                market_data[sym][bar] = d
-                timeframes_raw[bar] = d.get("raw_closes", [])
-            
-            pattern_evaluations[sym] = HistoricalPatternEngine.evaluate_asset_patterns(timeframes_raw)
-            
-        deriv_data = await fetch_derivatives_and_liquidations(session)
-        okx_extremes = await fetch_okx_top_extremes(session)
-        
-        tech_summary = ""
-        pattern_summary = ""
-        
-        for sym in symbols:
-            tech_summary += f"\n{sym} Wyższe Interwały (OKX/Binance/Kraken/Bybit):\n"
-            for bar in ["1h", "4h", "1d", "1w", "1M"]:
-                d = market_data[sym][bar]
-                tech_summary += f"- {bar}: Cena: ${d['close']}, RSI: {d['rsi']}, StochRSI_K: {d['stoch_k']}, MACD Line: {d['macd_line']}, Signal: {d['macd_signal']}, Hist: {d['macd_hist']}, EMA20: ${d['ema20']}, EMA50: ${d['ema50']}, EMA200: ${d['ema200']}\n"
-            
-            pat = pattern_evaluations[sym]
-            pattern_summary += f"- {sym}: Reżim: {pat.get('regime')}, Sygnał: {pat.get('pattern_signal')}, Wskaźnik Wykupienia: {pat.get('setup_progress')}%, Notatki: {pat.get('notes')}\n"
-
-        okx_summary = "Skanowanie OKX Ekstremów / Wykupień 1D (Short Trap):\n"
-        for item in okx_extremes[:4]:
-            okx_summary += f"- {item['symbol']}: Cena: ${item['close']}, RSI(1D): {item['rsi']}\n"
-
-        part1 = await generate_ai_part1(tech_summary, deriv_data, pattern_summary)
-        part2 = await generate_ai_part2(okx_summary)
-        full_report = f"📊 **RAPORT RYNKOWY SHORT TRAP**\n\n{part1}\n\n{part2}\n\n🔍 **Głęboka Płynność NEAR do $1.5:**\n{deriv_data['near_deep_liquidation']}"
-
-        await send_telegram(full_report)
-
-        html_boxes = ""
-        for sym in symbols:
-            rows = ""
-            for bar in ["1h", "4h", "1d", "1w", "1M"]:
-                d = market_data[sym][bar]
-                rows += f"""
-                <tr>
-                    <td><b>{bar}</b></td>
-                    <td>${d['close']}</td>
-                    <td>{d['rsi']}</td>
-                    <td>{d['stoch_k']}</td>
-                    <td>{d['macd_line']} / {d['macd_signal']} ({d['macd_hist']})</td>
-                    <td>${d['ema20']}</td>
-                    <td>${d['ema50']}</td>
-                    <td>${d['ema200']}</td>
-                </tr>
-                """
-            pat = pattern_evaluations[sym]
-            html_boxes += f"""
-            <div class="tech-card">
-                <h3>{sym} — Sygnał: <span class="badge">{pat.get('pattern_signal')}</span> | Wykupienie: <span class="badge" style="color: #ff5252;">{pat.get('setup_progress')}%</span></h3>
-                <p class="notes">{pat.get('notes')}</p>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Interwał</th><th>Cena Zamknięcia</th><th>RSI</th><th>StochRSI K</th><th>MACD</th><th>EMA 20</th><th>EMA 50</th><th>EMA 200</th>
-                        </tr>
-                    </thead>
-                    <tbody>{rows}</tbody>
-                </table>
-            </div>
-            """
-
-        html_content = f"""<!DOCTYPE html>
+        full_html = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Maker Monitor — Analiza Głęboka Płynności NEAR</title>
+    <title>Raport Rynkowy i Baza Świec Historycznych</title>
     <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f1115; color: #e1e1e6; margin: 0; padding: 25px; line-height: 1.6; }}
-        .container {{ max-width: 1100px; margin: 0 auto; background: #16181d; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
-        h1 {{ color: #ff5252; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
-        h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
-        .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #ff5252; }}
-        .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
-        .badge {{ background: #232730; color: #ff5252; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88em; }}
-        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2e39; }}
-        th {{ background-color: #0f1115; color: #8892b0; font-weight: 600; }}
-        tr:hover {{ background-color: #232730; }}
+        body {{ font-family: Arial, sans-serif; margin: 20px; background: #121212; color: #e0e0e0; }}
+        pre {{ background: #1e1e1e; padding: 15px; border-radius: 5px; white-space: pre-wrap; }}
+        h1 {{ color: #4CAF50; }}
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Market Maker Monitor — Głęboka Płynność i Luki NEAR</h1>
-        <p>Data aktualizacji: <b>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</b></p>
-        
-        <h2>1. Analiza Głęboka Płynności NEAR (do $1.5)</h2>
-        <div class="tech-card" style="border-left-color: #40c4ff;">
-            <pre style="white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: #e1e1e6;">{deriv_data['near_deep_liquidation']}</pre>
-        </div>
-
-        <h2>2. Wskaźniki Techniczne i Reżim Rynkowy</h2>
-        {html_boxes}
-    </div>
+    <h1>Raport Rynkowy</h1>
+    <pre>{html_content}</pre>
+    
+    <!-- Osadzone surowe dane historyczne 1h (2 lata) dla BTC, NEAR, S do przeszukiwania -->
+    <script id="historical-candles-data" type="application/json">
+    {json_data}
+    </script>
 </body>
-</html>"""
+</html>
+"""
 
-        upload_html_to_ftp(html_content)
+        with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
+            ftp.cwd("domains/piwecki.pl/public_html")
+            with open("report.html", "w", encoding="utf-8") as f:
+                f.write(full_html)
+            with open("report.html", "rb") as f:
+                ftp.storbinary("STOR report.html", f)
+        print("Raport HTML wraz z pełną bazą świec historycznych pomyślnie wysłany na FTP.")
+        return True
+    except Exception as e:
+        print(f"Błąd wysyłki FTP: {e}")
+        return False
+
+
+# --- 8. GŁÓWNA PĘTLA URUCHOMIONIOWA ---
+async def main():
+    print("Uruchamianie bota analitycznego z 2-letnią historią 1h...")
+    async with aiohttp.ClientSession() as session:
+        # Pobieranie 2-letnich danych historycznych dla 3 głównych aktywów (pełne świece OKX)
+        historical_candles_2y = {}
+        for sym in ["BTC", "NEAR", "S"]:
+            historical_candles_2y[sym] = await fetch_okx_historical_candles_2years(session, sym, "1H")
+
+        # Bieżące dane do raportu
+        btc_data = await fetch_aggregated_market_data(session, "BTC", "1h")
+        
+        btc_closes = [float(c[4]) for c in historical_candles_2y.get("BTC", [])] if historical_candles_2y.get("BTC") else btc_data.get("raw_closes", [])
+        
+        pattern_res = HistoricalPatternEngine.evaluate_asset_patterns({"1d": btc_closes[-100:] if len(btc_closes) >= 100 else btc_closes})
+        deriv_data = await fetch_derivatives_and_liquidations(session)
+        okx_extremes = await fetch_okx_top_extremes(session)
+
+        # Generowanie treści AI
+        part1 = await generate_ai_part1(str(btc_data), deriv_data, str(pattern_res))
+        part2 = await generate_ai_part2(str(okx_extremes))
+
+        full_report = f"*RAPORT RYNKOWY*\n\n{part1}\n\n{part2}"
+        
+        # Wysyłka powiadomienia na Telegram
+        await send_telegram(full_report)
+        
+        # Generowanie i wysyłka pliku HTML z osadzonymi świecami historycznymi na FTP
+        upload_html_to_ftp(full_report, historical_candles_2y)
 
 if __name__ == "__main__":
     asyncio.run(main())
