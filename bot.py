@@ -218,16 +218,28 @@ async def fetch_okx_candles(session, symbol, bar):
 async def fetch_okx_historical_candles_2years(session, symbol, bar="1H"):
     """
     Pobiera pełne dane historyczne świec (ts, o, h, l, c, vol) z ostatnich 2 lat
-    dla wskazanego instrumentu OKX i zwraca listę surowych świec.
+    dla wskazanego instrumentu OKX z wykorzystaniem endpointu bieżącego oraz historycznego.
     """
     inst_id = HISTORICAL_INSTRUMENTS.get(symbol, f"{symbol}-USDT-SWAP")
     all_candles = []
+    
+    # 1. Pobierz bieżące świece
+    url_candles = "https://www.okx.com/api/v5/market/candles"
+    try:
+        async with session.get(url_candles, params={"instId": inst_id, "bar": bar, "limit": "300"}, timeout=10) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if data.get("code") == "0" and data.get("data"):
+                    all_candles.extend(data["data"])
+    except Exception as e:
+        print(f"Błąd pobierania świec bieżących OKX ({symbol}): {e}")
+
+    current_after = all_candles[-1][0] if all_candles else None
+    url_history = "https://www.okx.com/api/v5/market/history-candles"
+    
     two_years_ms = 2 * 365 * 24 * 3600 * 1000
     end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
     start_target = end_time - two_years_ms
-    
-    current_after = None
-    url_history = "https://www.okx.com/api/v5/market/history-candles"
     
     print(f"Rozpoczynam 2-letnie pobieranie historyczne 1h dla {symbol}...")
 
@@ -262,9 +274,11 @@ async def fetch_okx_historical_candles_2years(session, symbol, bar="1H"):
             print(f"Błąd paginacji historycznej OKX ({symbol}): {e}")
             break
 
-    all_candles.sort(key=lambda x: int(x[0]))
-    print(f"Zakończono pobieranie historyczne dla {symbol}. Łącznie świec: {len(all_candles)}")
-    return all_candles
+    # Deduplikacja po timestampie i sortowanie rosnące
+    unique_map = {c[0]: c for c in all_candles}
+    sorted_candles = sorted(unique_map.values(), key=lambda x: int(x[0]))
+    print(f"Zakończono pobieranie historyczne dla {symbol}. Łącznie unikalnych świec: {len(sorted_candles)}")
+    return sorted_candles
 
 
 async def fetch_binance_candles(session, symbol, bar):
@@ -716,7 +730,7 @@ Jesteś profesjonalnym analitykiem rynkowym. Przygotuj Część 1 raportu (Kondy
 BEZWZGLĘDNE ZASADY:
 1. Brak wstępów.
 2. Zakaz podawania dokładnych wartości liczb wskaźników (RSI, MACD) w tekście.
-3. Skup się na strukturze, reżimie, strefach płynności oraz sprawdź czy NEAR ha luki płynnościowe w drodze do 1.5.
+3. Skup się na strukturze, reżimie, strefach płynności oraz sprawdź czy NEAR ma luki płynnościowe w drodze do 1.5.
 
 STAN TECHNICZNY I WZORCE:
 {pattern_summary}
@@ -786,48 +800,59 @@ async def send_telegram(text):
             await asyncio.sleep(1)
 
 
-# --- 7. WYSYŁKA HTML NA FTP (ZAWIERAJĄCY DANE ŚWIECOWE W JSON) ---
+# --- 7. WYSYŁKA HTML NA FTP ORAZ ZAPIS LOKALNY Z DANYMI JSON ---
 def upload_html_to_ftp(html_content, historical_data):
-    if not FTP_USER or not FTP_PASS:
-        print("Brak danych logowania do FTP.")
-        return False
     try:
-        # Serializacja 2-letnich danych historycznych do JSON
         json_data = json.dumps(historical_data, ensure_ascii=False)
         
         full_html = f"""<!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
-    <title>Raport Rynkowy i Baza Świec Historycznych</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Market Maker Monitor — Analiza Głęboka Płynności NEAR</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; background: #121212; color: #e0e0e0; }}
-        pre {{ background: #1e1e1e; padding: 15px; border-radius: 5px; white-space: pre-wrap; }}
-        h1 {{ color: #4CAF50; }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f1115; color: #e1e1e6; margin: 0; padding: 25px; line-height: 1.6; }}
+        .container {{ max-width: 1100px; margin: 0 auto; background: #16181d; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
+        h1 {{ color: #ff5252; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
+        h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
+        .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #ff5252; }}
+        .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
+        .badge {{ background: #232730; color: #ff5252; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88em; }}
+        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2e39; }}
+        th {{ background-color: #0f1115; color: #8892b0; font-weight: 600; }}
+        tr:hover {{ background-color: #232730; }}
     </style>
 </head>
 <body>
-    <h1>Raport Rynkowy</h1>
-    <pre>{html_content}</pre>
-    
-    <!-- Osadzone surowe dane historyczne 1h (2 lata) dla BTC, NEAR, S do przeszukiwania -->
-    <script id="historical-candles-data" type="application/json">
-    {json_data}
-    </script>
+    <div class="container">
+        <h1>Market Maker Monitor — Raport i Baza Historyczna Świec</h1>
+        <pre style="white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: #e1e1e6;">{html_content}</pre>
+        
+        <!-- Osadzone surowe dane historyczne 1h w formacie JSON do przeszukiwania -->
+        <script id="historical-candles-data" type="application/json">
+        {json_data}
+        </script>
+    </div>
 </body>
 </html>
 """
+        # Gwarantowany zapis lokalny
+        with open("report.html", "w", encoding="utf-8") as f:
+            f.write(full_html)
+        print("Lokalny plik report.html został zapisany wraz z bazą JSON.")
 
-        with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
-            ftp.cwd("domains/piwecki.pl/public_html")
-            with open("report.html", "w", encoding="utf-8") as f:
-                f.write(full_html)
-            with open("report.html", "rb") as f:
-                ftp.storbinary("STOR report.html", f)
-        print("Raport HTML wraz z pełną bazą świec historycznych pomyślnie wysłany na FTP.")
+        # Wysyłka na FTP
+        if FTP_USER and FTP_PASS:
+            with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
+                ftp.cwd("domains/piwecki.pl/public_html")
+                with open("report.html", "rb") as f:
+                    ftp.storbinary("STOR report.html", f)
+            print("Raport HTML pomyślnie wysłany na FTP.")
         return True
     except Exception as e:
-        print(f"Błąd wysyłki FTP: {e}")
+        print(f"Błąd wysyłki/zapisu HTML: {e}")
         return False
 
 
