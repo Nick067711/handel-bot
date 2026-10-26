@@ -6,7 +6,7 @@ import aiohttp
 import numpy as np
 from datetime import datetime, timezone
 from google import genai
-from google.genai.errors import APIError
+from google.genai import types
 
 # --- KONFIGURACJA ŚRODOWISKOWA / API ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -16,6 +16,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
 FTP_USER = os.getenv("FTP_USER", "")
 FTP_PASS = os.getenv("FTP_PASS", "")
+FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
 # Instrumenty do 2-letniej analizy historycznej 1h
 HISTORICAL_INSTRUMENTS = {
@@ -23,7 +24,6 @@ HISTORICAL_INSTRUMENTS = {
     "NEAR": "NEAR-USDT-SWAP",
     "S": "S-USDT-SWAP"
 }
-
 
 # --- 1. PEŁNY SILNIK ANALIZY TECHNICZNEJ I WZORCÓW HISTORYCZNYCH ---
 class HistoricalPatternEngine:
@@ -197,7 +197,7 @@ class HistoricalPatternEngine:
         }
 
 
-# --- 2. POBIERANIE ŚWIEC Z OKX, BINANCE, KRAKEN I BYBIT ---
+# --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD ---
 async def fetch_okx_candles(session, symbol, bar):
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D", "1w": "1W", "1M": "1M"}
     inst_id = f"{symbol}-USDT-SWAP"
@@ -215,72 +215,6 @@ async def fetch_okx_candles(session, symbol, bar):
     return None
 
 
-async def fetch_okx_historical_candles_2years(session, symbol, bar="1H"):
-    """
-    Pobiera pełne dane historyczne świec (ts, o, h, l, c, vol) z ostatnich 2 lat
-    dla wskazanego instrumentu OKX z wykorzystaniem endpointu bieżącego oraz historycznego.
-    """
-    inst_id = HISTORICAL_INSTRUMENTS.get(symbol, f"{symbol}-USDT-SWAP")
-    all_candles = []
-    
-    # 1. Pobierz bieżące świece
-    url_candles = "https://www.okx.com/api/v5/market/candles"
-    try:
-        async with session.get(url_candles, params={"instId": inst_id, "bar": bar, "limit": "300"}, timeout=10) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if data.get("code") == "0" and data.get("data"):
-                    all_candles.extend(data["data"])
-    except Exception as e:
-        print(f"Błąd pobierania świec bieżących OKX ({symbol}): {e}")
-
-    current_after = all_candles[-1][0] if all_candles else None
-    url_history = "https://www.okx.com/api/v5/market/history-candles"
-    
-    two_years_ms = 2 * 365 * 24 * 3600 * 1000
-    end_time = int(datetime.now(timezone.utc).timestamp() * 1000)
-    start_target = end_time - two_years_ms
-    
-    print(f"Rozpoczynam 2-letnie pobieranie historyczne 1h dla {symbol}...")
-
-    while True:
-        params = {"instId": inst_id, "bar": bar, "limit": "100"}
-        if current_after:
-            params["after"] = current_after
-
-        try:
-            async with session.get(url_history, params=params, timeout=10) as resp:
-                if resp.status != 200:
-                    break
-                data = await resp.json()
-                
-                if data.get("code") != "0" or not data.get("data"):
-                    break
-                    
-                candles = data["data"]
-                if not candles:
-                    break
-                    
-                all_candles.extend(candles)
-                current_after = candles[-1][0]
-                oldest_timestamp = int(candles[-1][0])
-                
-                if oldest_timestamp <= start_target:
-                    print(f"Osiągnięto horyzont 2 lat dla {symbol}.")
-                    break
-                    
-                await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"Błąd paginacji historycznej OKX ({symbol}): {e}")
-            break
-
-    # Deduplikacja po timestampie i sortowanie rosnące
-    unique_map = {c[0]: c for c in all_candles}
-    sorted_candles = sorted(unique_map.values(), key=lambda x: int(x[0]))
-    print(f"Zakończono pobieranie historyczne dla {symbol}. Łącznie unikalnych świec: {len(sorted_candles)}")
-    return sorted_candles
-
-
 async def fetch_binance_candles(session, symbol, bar):
     bar_map = {"1h": "1h", "4h": "4h", "1d": "1d", "1w": "1w", "1M": "1M"}
     bn_symbol = f"{symbol}USDT"
@@ -294,6 +228,7 @@ async def fetch_binance_candles(session, symbol, bar):
     except Exception as e:
         print(f"Binance Fetch error ({symbol} {bar}): {e}")
     return None
+
 
 async def fetch_kraken_candles(session, symbol, bar):
     bar_map = {"1h": 60, "4h": 240, "1d": 1440, "1w": 10080, "1M": 21600}
@@ -311,6 +246,7 @@ async def fetch_kraken_candles(session, symbol, bar):
         print(f"Kraken Fetch error ({symbol} {bar}): {e}")
     return None
 
+
 async def fetch_bybit_candles(session, symbol, bar):
     bar_map = {"1h": "60", "4h": "240", "1d": "D", "1w": "W", "1M": "M"}
     by_symbol = f"{symbol}USDT"
@@ -325,6 +261,7 @@ async def fetch_bybit_candles(session, symbol, bar):
     except Exception as e:
         print(f"Bybit Fetch error ({symbol} {bar}): {e}")
     return None
+
 
 async def fetch_aggregated_market_data(session, symbol, bar):
     tasks = [
@@ -384,25 +321,7 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. DYNAMICZNY SKAN TOP SELEKCJI OKX (EKSTREMA / SHORT TRAP) ---
-async def fetch_okx_top_extremes(session):
-    symbols = ["SOL", "SUI", "ETH", "AVAX", "LINK", "ADA", "DOGE", "NEAR", "APT", "STRK"]
-    results = []
-    for sym in symbols:
-        closes = await fetch_okx_candles(session, sym, "1d")
-        if closes and len(closes) >= 20:
-            rsi = HistoricalPatternEngine.calculate_rsi(closes)
-            results.append({
-                "symbol": sym,
-                "close": closes[-1],
-                "rsi": rsi,
-                "extreme_score": rsi
-            })
-    results = sorted(results, key=lambda x: x["extreme_score"], reverse=True)
-    return results
-
-
-# --- HELPER: KOSZYKOWA AGREGACJA PŁYNNOŚCI ZE WSZYSTKICH GIEŁD ---
+# --- 3. POBIERANIE PŁYNNOŚCI I POCHODNYCH ZE WSZYSTKICH GIEŁD ---
 def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     bin_size = 500.0 if is_btc else 0.0005
     token_name = "BTC" if is_btc else "STRK"
@@ -448,7 +367,6 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     return best_ask_str, best_bid_str
 
 
-# --- SPECJALNA FUNKCJA: GŁĘBOKI SKAN PŁYNNOŚCI NEAR DO POZIOMU 1.5 ---
 async def fetch_near_deep_liquidation_zones(session):
     near_walls = []
     current_price = 4.392
@@ -514,12 +432,11 @@ async def fetch_near_deep_liquidation_zones(session):
     report_text = f"--- GŁĘBOKA ANALIZA PŁYNNOŚCI NEAR (od obecnej ceny do $1.5) ---\n"
     report_text += f"Znaczące ściany wsparcia po drodze:\n" + "\n".join(significant_walls[:10]) + "\n"
     if liquidity_gaps:
-        report_text += f"Potencjalne Luki Płynnościowe (szybki zjazd ceny bez oporu):\n" + ", ".join(liquidity_gaps[:10]) + "\n"
+        report_text += f"Potencjalne Luki Płynnościowe: " + ", ".join(liquidity_gaps[:10]) + "\n"
     
     return report_text
 
 
-# --- 4. OPEN INTEREST, FUNDING RATES & KOSZYKOWY SKAN PŁYNNOŚCI ---
 async def fetch_derivatives_and_liquidations(session):
     derivatives_info = {
         "open_interest_okx": "Brak danych",
@@ -599,18 +516,6 @@ async def fetch_derivatives_and_liquidations(session):
                     derivatives_info["funding_rate_strk"] = f"{fr:.4f}%"
     except Exception as e:
         print(f"Funding Rate STRK OKX error: {e}")
-
-    try:
-        url_liq = "https://api.bybit.com/v5/market/recent-trade?category=linear&symbol=BTCUSDT&limit=50"
-        async with session.get(url_liq, timeout=8) as resp:
-            if resp.status == 200:
-                res = await resp.json()
-                trades = res.get("result", {}).get("list", [])
-                large_sells = sum(1 for t in trades if t.get("side") == "Sell" and float(t.get("size", 0)) > 2.0)
-                large_buys = sum(1 for t in trades if t.get("side") == "Buy" and float(t.get("size", 0)) > 2.0)
-                derivatives_info["liquidations_bybit"] = f"Presja Buy: {large_buys} | Presja Sell: {large_sells} dużych transakcji"
-    except Exception as e:
-        print(f"Liquidations Bybit error: {e}")
 
     btc_current_price = 82800.0
     try:
@@ -711,180 +616,167 @@ async def fetch_derivatives_and_liquidations(session):
     if strk_walls:
         ask_zone_s, bid_zone_s = aggregate_baskets_to_zones(strk_walls, strk_current_price, is_btc=False)
         derivatives_info["liquidation_map_strk"] = f"Strefa Ask: {ask_zone_s} | Strefa Bid: {bid_zone_s}"
-    else:
-        derivatives_info["liquidation_map_strk"] = "Brak danych w pełnym zakresie"
 
     derivatives_info["near_deep_liquidation"] = await fetch_near_deep_liquidation_zones(session)
-
     return derivatives_info
 
 
-# --- 5. ROZBITE, LEKKIE ZAPYTANIA DO AI ---
-async def generate_ai_part1(tech_summary, deriv_data, pattern_summary):
-    if not GEMINI_API_KEY:
-        return "Brak klucza API Gemini."
-    
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = f"""
-Jesteś profesjonalnym analitykiem rynkowym. Przygotuj Część 1 raportu (Kondycja Rynku, BTC, STRK, S, oraz Głęboka Płynność NEAR do 1.5 USD) na podstawie poniższych danych.
-BEZWZGLĘDNE ZASADY:
-1. Brak wstępów.
-2. Zakaz podawania dokładnych wartości liczb wskaźników (RSI, MACD) w tekście.
-3. Skup się na strukturze, reżimie, strefach płynności oraz sprawdź czy NEAR ma luki płynnościowe w drodze do 1.5.
+# --- 4. OKX TOP SCANNER ---
+async def fetch_okx_top_extremes(session):
+    symbols = ["SOL", "SUI", "ETH", "AVAX", "LINK", "ADA", "DOGE", "NEAR", "APT", "STRK"]
+    results = []
+    for sym in symbols:
+        closes = await fetch_okx_candles(session, sym, "1d")
+        if closes and len(closes) >= 20:
+            rsi = HistoricalPatternEngine.calculate_rsi(closes)
+            results.append({
+                "symbol": sym,
+                "close": closes[-1],
+                "rsi": rsi,
+                "extreme_score": rsi
+            })
+    results = sorted(results, key=lambda x: x["extreme_score"], reverse=True)
+    return results
 
-STAN TECHNICZNY I WZORCE:
+
+# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI (gemini-3.8-flash) ---
+async def generate_ai_report(btc_tech, alt_scans, deriv_data, pattern_summary):
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Brak klucza API Gemini (GEMINI_API_KEY).")
+        
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    prompt = f"""
+Jesteś zaawansowanym systemem analitycznym Market Maker Monitor. Przeanalizuj poniższe dane rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) i przygotuj kompleksowy raport HTML oraz treść powiadomień.
+
+DANE TECHNICZNE BTC:
+{json.dumps(btc_tech, indent=2)}
+
+WYNIKI WZORCÓW HISTORYCZNYCH I REŻIM:
 {pattern_summary}
 
-ZAGREGOWANE STREFY PŁYNNOŚCI I POCHODNE:
-- BTC Płynność: {deriv_data['liquidation_map_btc']}
-- STRK Płynność: {deriv_data['liquidation_map_strk']}
-- NEAR Płynność i Luki do $1.5: {deriv_data['near_deep_liquidation']}
-- OI BTC: {deriv_data['open_interest_okx']} | OI STRK: {deriv_data['open_interest_strk']}
-- Funding Rates: BTC {deriv_data['funding_rate_okx']} | STRK {deriv_data['funding_rate_strk']}
-- Baza Kosztowa: {deriv_data['realized_price']}
+DANE PŁYNNOŚCIOWE I POCHODNE ZE WSZYSTKICH GIEŁD:
+{json.dumps(deriv_data, indent=2)}
+
+TOP SKAN OKX (ALTCOINY):
+{json.dumps(alt_scans, indent=2)}
+
+Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z następującymi kluczami:
+1. "html_content": pełny kod HTML raportu (estetyczny ciemny motyw, sekcja główna z analizą oraz dedykowana sekcja danych technicznych dla asystenta u dołu).
+2. "telegram_msg_btc": Treść wiadomości Telegram nr 1 – wyłącznie sytuacja na Bitcoinie (BTC), ogólna kondycja rynku, strefy płynności i kluczowe wskaźniki. Wcześniej wpisane inne projekty na stałe są całkowicie wyłączone z tego zestawienia.
+3. "telegram_msg_signals": Treść wiadomości Telegram nr 2 – Top Selekcja Altcoinowa (2-3 najlepsze okazje oparte o płynne pary USDT/USDC na OKX, ze strefą wejścia, SL, TP oraz bezpiecznymi widełkami pozycji).
+
+BEZWZGLĘDNE ZASADY:
+- Zakaz stosowania formatowania LaTeX (zakaz używania ukośników wstecznych przy liczbach, np. zapisuj ceny wyłącznie w czystym formacie typu `$81,500` lub `$4.55`).
 """
-    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    for model in candidate_models:
-        for attempt in range(1, 3):
-            try:
-                response = client.models.generate_content(model=model, contents=prompt)
-                if response and response.text:
-                    return response.text.strip()
-            except Exception as e:
-                print(f"Ostrzeżenie API Część 1 ({model}): {e}")
-                await asyncio.sleep(3)
-    return "Analiza makro niedostępna (chwilowy limit API)."
 
-
-async def generate_ai_part2(okx_extremes):
-    if not GEMINI_API_KEY:
-        return "Brak klucza API Gemini."
+    response = client.models.generate_content(
+        model="gemini-3.8-flash",
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.2
+        ),
+    )
     
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = f"""
-Przygotuj Część 2 raportu: Top Selekcja Short Trap (wykupione projekty z OKX z potencjałem gwałtownego spadku).
-Zasady: Krótko, profesjonalnie, bez podawania dokładnych wartości wskaźników w tekście.
-
-DANE EKSTREMÓW OKX (SHORT TRAP TARGETS):
-{okx_extremes}
-"""
-    candidate_models = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    for model in candidate_models:
-        for attempt in range(1, 3):
-            try:
-                response = client.models.generate_content(model=model, contents=prompt)
-                if response and response.text:
-                    return response.text.strip()
-            except Exception as e:
-                print(f"Ostrzeżenie API Część 2 ({model}): {e}")
-                await asyncio.sleep(3)
-    return "Top Selekcja Short Trap: Brak danych z API."
-
-
-# --- 6. WYSYŁKA NA TELEGRAM ---
-async def send_telegram(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("Brak danych konfiguracyjnych Telegrama.")
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    
-    max_len = 4000
-    chunks = [text[i:i+max_len] for i in range(0, len(text), max_len)]
-    
-    async with aiohttp.ClientSession() as session:
-        for chunk in chunks:
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": chunk, "parse_mode": "Markdown"}
-            async with session.post(url, json=payload) as resp:
-                res_text = await resp.text()
-                print(f"Odpowiedź Telegram API: {res_text}")
-            await asyncio.sleep(1)
-
-
-# --- 7. WYSYŁKA HTML NA FTP ORAZ ZAPIS LOKALNY Z DANYMI JSON ---
-def upload_html_to_ftp(html_content, historical_data):
     try:
-        json_data = json.dumps(historical_data, ensure_ascii=False)
-        
-        full_html = f"""<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Market Maker Monitor — Analiza Głęboka Płynności NEAR</title>
-    <style>
-        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0f1115; color: #e1e1e6; margin: 0; padding: 25px; line-height: 1.6; }}
-        .container {{ max-width: 1100px; margin: 0 auto; background: #16181d; padding: 30px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.7); }}
-        h1 {{ color: #ff5252; border-bottom: 2px solid #232730; padding-bottom: 12px; margin-top: 0; }}
-        h2 {{ color: #40c4ff; margin-top: 35px; border-bottom: 1px solid #232730; padding-bottom: 8px; }}
-        .tech-card {{ background: #1a1d24; padding: 20px; border-radius: 8px; margin-top: 20px; border-left: 5px solid #ff5252; }}
-        .notes {{ font-size: 0.9em; color: #b0b5c0; margin: 5px 0 15px 0; }}
-        .badge {{ background: #232730; color: #ff5252; padding: 3px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88em; }}
-        th, td {{ padding: 10px 12px; text-align: left; border-bottom: 1px solid #2a2e39; }}
-        th {{ background-color: #0f1115; color: #8892b0; font-weight: 600; }}
-        tr:hover {{ background-color: #232730; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Market Maker Monitor — Raport i Baza Historyczna Świec</h1>
-        <pre style="white-space: pre-wrap; font-family: inherit; font-size: 0.9em; color: #e1e1e6;">{html_content}</pre>
-        
-        <!-- Osadzone surowe dane historyczne 1h w formacie JSON do przeszukiwania -->
-        <script id="historical-candles-data" type="application/json">
-        {json_data}
-        </script>
-    </div>
-</body>
-</html>
-"""
-        # Gwarantowany zapis lokalny
-        with open("report.html", "w", encoding="utf-8") as f:
-            f.write(full_html)
-        print("Lokalny plik report.html został zapisany wraz z bazą JSON.")
-
-        # Wysyłka na FTP
-        if FTP_USER and FTP_PASS:
-            with ftplib.FTP(FTP_HOST, FTP_USER, FTP_PASS) as ftp:
-                ftp.cwd("domains/piwecki.pl/public_html")
-                with open("report.html", "rb") as f:
-                    ftp.storbinary("STOR report.html", f)
-            print("Raport HTML pomyślnie wysłany na FTP.")
-        return True
+        return json.loads(response.text)
     except Exception as e:
-        print(f"Błąd wysyłki/zapisu HTML: {e}")
+        print(f"Błąd parsowania JSON z odpowiedzi Gemini: {e}")
+        return None
+
+
+# --- 6. FTP UPLOAD & TELEGRAM SENDER ---
+def upload_to_ftp(html_content):
+    if not all([FTP_HOST, FTP_USER, FTP_PASS]):
+        print("Brak pełnej konfiguracji FTP. Pomijam upload.")
+        return False
+        
+    try:
+        with ftplib.FTP_TLS(FTP_HOST) as ftp:
+            ftp.login(FTP_USER, FTP_PASS)
+            ftp.prot_p()
+            
+            dirs = FTP_DIR.split("/")
+            for d in dirs:
+                if d:
+                    try:
+                        ftp.cwd(d)
+                    except ftplib.error_perm:
+                        ftp.mkd(d)
+                        ftp.cwd(d)
+                        
+            temp_filename = "index.html"
+            with open(temp_filename, "w", encoding="utf-8") as f:
+                f.write(html_content)
+                
+            with open(temp_filename, "rb") as f:
+                ftp.storbinary(f"STOR index.html", f)
+                
+            os.remove(temp_filename)
+            print("Raport pomyślnie przesłany na serwer FTP: https://piwecki.pl/analiza/")
+            return True
+    except Exception as e:
+        print(f"Błąd wysyłki FTP: {e}")
         return False
 
 
-# --- 8. GŁÓWNA PĘTLA URUCHOMIONIOWA ---
+def send_telegram_message(text):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        print("Brak konfiguracji Telegrama.")
+        return
+        
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text
+        # Celowo brak parse_mode, aby zapobiec błędom składniowym
+    }
+    data = urllib.parse.urlencode(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            if not res_data.get("ok"):
+                print(f"Telegram API error: {res_data}")
+    except Exception as e:
+        print(f"Błąd wysyłki wiadomości Telegram: {e}")
+
+
+# --- 7. GŁÓWNA FUNKCJA URUCHOMIONIOWA ---
 async def main():
-    print("Uruchamianie bota analitycznego z 2-letnią historią 1h...")
+    print("Start pełnego cyklu analitycznego Market Maker Monitor...")
     async with aiohttp.ClientSession() as session:
-        # Pobieranie 2-letnich danych historycznych dla 3 głównych aktywów (pełne świece OKX)
-        historical_candles_2y = {}
-        for sym in ["BTC", "NEAR", "S"]:
-            historical_candles_2y[sym] = await fetch_okx_historical_candles_2years(session, sym, "1H")
-
-        # Bieżące dane do raportu
-        btc_data = await fetch_aggregated_market_data(session, "BTC", "1h")
+        btc_tech = {}
+        for bar in ["1h", "4h", "1d", "1w"]:
+            btc_tech[bar] = await fetch_aggregated_market_data(session, "BTC", bar)
+            
+        timeframes_for_engine = {
+            "1M": await fetch_okx_candles(session, "BTC", "1M") or [],
+            "1w": btc_tech.get("1w", {}).get("raw_closes", []),
+            "1d": btc_tech.get("1d", {}).get("raw_closes", []),
+            "1h": btc_tech.get("1h", {}).get("raw_closes", [])
+        }
+        pattern_summary = HistoricalPatternEngine.evaluate_asset_patterns(timeframes_for_engine)
         
-        btc_closes = [float(c[4]) for c in historical_candles_2y.get("BTC", [])] if historical_candles_2y.get("BTC") else btc_data.get("raw_closes", [])
-        
-        pattern_res = HistoricalPatternEngine.evaluate_asset_patterns({"1d": btc_closes[-100:] if len(btc_closes) >= 100 else btc_closes})
         deriv_data = await fetch_derivatives_and_liquidations(session)
-        okx_extremes = await fetch_okx_top_extremes(session)
-
-        # Generowanie treści AI
-        part1 = await generate_ai_part1(str(btc_data), deriv_data, str(pattern_res))
-        part2 = await generate_ai_part2(str(okx_extremes))
-
-        full_report = f"*RAPORT RYNKOWY*\n\n{part1}\n\n{part2}"
+        alt_scans = await fetch_okx_top_extremes(session)
         
-        # Wysyłka powiadomienia na Telegram
-        await send_telegram(full_report)
+        report_data = await generate_ai_report(btc_tech, alt_scans, deriv_data, pattern_summary)
+        if not report_data:
+            print("Nie udało się wygenerować raportu przez model AI.")
+            return
+            
+        upload_to_ftp(report_data.get("html_content", ""))
         
-        # Generowanie i wysyłka pliku HTML z osadzonymi świecami historycznymi na FTP
-        upload_html_to_ftp(full_report, historical_candles_2y)
+        if report_data.get("telegram_msg_btc"):
+            send_telegram_message(report_data["telegram_msg_btc"])
+            await asyncio.sleep(1.5)
+            
+        if report_data.get("telegram_msg_signals"):
+            send_telegram_message(report_data["telegram_msg_signals"])
+            
+    print("Cykl analityczny zakończony pomyślnie.")
 
 if __name__ == "__main__":
     asyncio.run(main())
