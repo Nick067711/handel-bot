@@ -7,14 +7,12 @@ import urllib.request
 import urllib.parse
 import numpy as np
 from datetime import datetime, timezone
-import anthropic
 from openai import OpenAI
 
 # --- KONFIGURACJA ŚRODOWISKOWA / API ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
 FTP_USER = os.getenv("FTP_USER", "")
@@ -308,8 +306,17 @@ async def fetch_multi_exchange_liquidity(session):
     return liquidity_data
 
 
-# --- 4. ANALIZA AI (CLAUDE JAKO GŁÓWNY, GPT-4O JAKO FAILOVER) ---
+# --- 4. ANALIZA AI (GROQ API - DWUTOROWY SYSTEM Z LLA, 0 ZŁ) ---
 def generate_ai_report(btc_data, near_data, liquidity_data):
+    if not GROQ_API_KEY:
+        print("Błąd: Brak klucza GROQ_API_KEY.")
+        return None
+
+    client = OpenAI(
+        base_url="https://api.groq.com/openai/v1",
+        api_key=GROQ_API_KEY
+    )
+
     prompt = f"""
 Jesteś profesjonalnym doradcą day tradingu skupionym na korelacji Bitcoina (BTC) i NEAR.
 Przeanalizuj poniższe gotowe wskaźniki rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) z interwałów 1h, 4h oraz 1d:
@@ -333,47 +340,15 @@ BEZWZGLĘDNE ZASADY:
 - Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
 """
 
-    # 1. PRÓBA: CLAUDE (ANTHROPIC)
-    if ANTHROPIC_API_KEY:
+    # TOR 1: GŁÓWNY MODEL (Llama 3.3 70B Versatile)
+    primary_model = "llama-3.3-70b-versatile"
+    max_retries = 3
+    
+    for attempt in range(max_retries):
         try:
-            print("Wysyłam zapytanie do Claude (Anthropic)...")
-            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-            message = client.messages.create(
-                model="claude-3-5-sonnet-20241022",
-                max_tokens=4000,
-                temperature=0.2,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw_text = message.content[0].text
-            # Czyszczenie odpowiedzi w razie otoczenia blokiem ```json ... ```
-            if "```json" in raw_text:
-                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in raw_text:
-                raw_text = raw_text.split("```")[1].split("```")[0].strip()
-                
-            data = json.loads(raw_text)
-            
-            # Doklejamy podpis o modelu
-            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Claude 3.5 Sonnet</small>"
-            tg_sig = "\n\n<i>Analiza przygotowana przez: Claude 3.5 Sonnet</i>"
-            
-            if "html_content" in data and "</body>" in data["html_content"]:
-                data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
-            if "telegram_msg_btc" in data:
-                data["telegram_msg_btc"] += tg_sig
-                
-            print("Sukces! Analiza wygenerowana przez Claude.")
-            return data
-        except Exception as e:
-            print(f"Claude API error: {e}. Przełączam na zapasowy model OpenAI...")
-
-    # 2. PRÓBA (FAILOVER): OPENAI GPT-4O
-    if OPENAI_API_KEY:
-        try:
-            print("Wysyłam zapytanie do ChatGPT (OpenAI GPT-4o)...")
-            client = OpenAI(api_key=OPENAI_API_KEY)
+            print(f"Wysyłam zapytanie do Groq [{primary_model}] (próba {attempt + 1}/{max_retries})...")
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=primary_model,
                 messages=[
                     {"role": "system", "content": "Jesteś profesjonalnym analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
                     {"role": "user", "content": prompt}
@@ -384,21 +359,55 @@ BEZWZGLĘDNE ZASADY:
             raw_text = response.choices[0].message.content
             data = json.loads(raw_text)
             
-            # Doklejamy podpis o modelu
-            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: OpenAI GPT-4o</small>"
-            tg_sig = "\n\n<i>Analiza przygotowana przez: OpenAI GPT-4o</i>"
+            # Podpis modelu głównego
+            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3.3 70B (Groq)</small>"
+            tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3.3 70B (Groq)</i>"
             
             if "html_content" in data and "</body>" in data["html_content"]:
                 data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
             if "telegram_msg_btc" in data:
                 data["telegram_msg_btc"] += tg_sig
                 
-            print("Sukces! Analiza wygenerowana przez OpenAI GPT-4o.")
+            print("Sukces! Analiza wygenerowana przez Llama 3.3 70B.")
             return data
         except Exception as e:
-            print(f"OpenAI API error: {e}")
+            print(f"Błąd w torze głównym (próba {attempt + 1}): {e}")
+            if attempt < max_retries - 1:
+                import time
+                time.sleep(5)
 
-    print("Wszystkie modele AI zawiodły.")
+    # TOR 2 (ZAPASOWY): Llama 3.1 8B Instant
+    backup_model = "llama-3.1-8b-instant"
+    print(f"Tor główny zawiódł. Przełączam na drugi tor zapasowy: {backup_model}...")
+    
+    try:
+        response = client.chat.completions.create(
+            model=backup_model,
+            messages=[
+                {"role": "system", "content": "Jesteś profesjonalnym analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={"type": "json_object"},
+            temperature=0.2
+        )
+        raw_text = response.choices[0].message.content
+        data = json.loads(raw_text)
+        
+        # Podpis modelu zapasowego
+        model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3.1 8B (Groq)</small>"
+        tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3.1 8B (Groq)</i>"
+        
+        if "html_content" in data and "</body>" in data["html_content"]:
+            data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
+        if "telegram_msg_btc" in data:
+            data["telegram_msg_btc"] += tg_sig
+            
+        print("Sukces! Analiza wygenerowana przez zapasowy model Llama 3.1 8B.")
+        return data
+    except Exception as e:
+        print(f"Błąd w torze zapasowym Groq: {e}")
+
+    print("Wszystkie tory AI zawiodły.")
     return None
 
 
