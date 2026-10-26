@@ -210,9 +210,9 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. PŁYNNOŚĆ I ORDERBOOKI (SZERSZE ZAKRESY) ---
+# --- 3. PEŁNA WIELOGIEŁDOWA AGREGACJA PŁYNNOŚCI I ORDERBOOKÓW ---
 def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
-    # Zwiększone zakresy (bin_size) dla rzetelnego obrazu day tradingu (1h/4h/1d)
+    # Szersze zakresy dla day tradingu (1h/4h/1d)
     bin_size = 1000.0 if is_btc else 0.20
     token_name = "BTC" if is_btc else "NEAR"
     asks_bins, bids_bins = {}, {}
@@ -233,24 +233,29 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
             
     best_ask, best_bid = "Brak", "Brak"
     if asks_bins:
-        k = max(asks_bins, key=lambda x: asks_bins[x]["token"])
-        best_ask = f"${k:,.2f} - ${k+bin_size:,.2f} | {asks_bins[k]['token']:,.2f} {token_name}"
+        k_ask = max(asks_bins, key=lambda x: asks_bins[x]["token"])
+        best_ask = f"${k_ask:,.2f} - ${k_ask+bin_size:,.2f} | {asks_bins[k_ask]['token']:,.2f} {token_name}"
     if bids_bins:
-        k = max(bids_bins, key=lambda x: asks_bins[x]["token"])
-        best_bid = f"${k:,.2f} - ${k+bin_size:,.2f} | {bids_bins[k]['token']:,.2f} {token_name}"
+        k_bid = max(bids_bins, key=lambda x: bids_bins[x]["token"])
+        best_bid = f"${k_bid:,.2f} - ${k_bid+bin_size:,.2f} | {bids_bins[k_bid]['token']:,.2f} {token_name}"
     return best_ask, best_bid
 
 async def fetch_multi_exchange_liquidity(session):
     liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak"}
+    
+    # --- BTC ORDERBOOKS (OKX, Binance, Bybit, Kraken) ---
     btc_walls = []
+    
+    # OKX BTC
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=400", timeout=5) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=300", timeout=5) as resp:
             res = await resp.json()
             if res.get("data"):
                 for a in res["data"][0].get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
                 for b in res["data"][0].get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
+    # Binance BTC
     try:
         async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=500", timeout=5) as resp:
             res = await resp.json()
@@ -258,24 +263,55 @@ async def fetch_multi_exchange_liquidity(session):
             for b in res.get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
+    # Bybit BTC
+    try:
+        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200", timeout=5) as resp:
+            res = await resp.json()
+            result = res.get("result", {})
+            for a in result.get("a", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
+            for b in result.get("b", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
+    except Exception: pass
+
+    # Kraken BTC
+    try:
+        async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=100", timeout=5) as resp:
+            res = await resp.json()
+            result = res.get("result", {}).get("XXBTZUSDT", {}) or res.get("result", {}).get("XBTUSDT", {})
+            for a in result.get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
+            for b in result.get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
+    except Exception: pass
+
     if btc_walls:
         ask_z, bid_z = aggregate_baskets_to_zones(btc_walls, 80000.0, is_btc=True)
         liquidity_data["btc_liquidation_map"] = f"Opór (Ask): {ask_z} | Wsparcie (Bid): {bid_z}"
 
+    # --- NEAR ORDERBOOKS (OKX, Binance, Bybit) ---
     near_walls = []
+    
+    # OKX NEAR
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=400", timeout=5) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=300", timeout=5) as resp:
             res = await resp.json()
             if res.get("data"):
                 for a in res["data"][0].get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
                 for b in res["data"][0].get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
+    # Binance NEAR
     try:
         async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=500", timeout=5) as resp:
             res = await resp.json()
             for a in res.get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
             for b in res.get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
+    except Exception: pass
+
+    # Bybit NEAR
+    try:
+        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=NEARUSDT&limit=200", timeout=5) as resp:
+            res = await resp.json()
+            result = res.get("result", {})
+            for a in result.get("a", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
+            for b in result.get("b", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
     if near_walls:
@@ -294,7 +330,7 @@ async def generate_ai_report(btc_data, near_data, liquidity_data):
     
     prompt = f"""
 Jesteś profesjonalnym doradcą day tradingu skupionym na korelacji Bitcoina (BTC) i NEAR.
-Przeanalizuj poniższe dane rynkowe z interwałów 1h, 4h oraz 1d:
+Przeanalizuj poniższe dane rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) z interwałów 1h, 4h oraz 1d:
 
 BTC DANE:
 {json.dumps(btc_data, indent=2)}
@@ -302,7 +338,7 @@ BTC DANE:
 NEAR DANE:
 {json.dumps(near_data, indent=2)}
 
-PŁYNNOŚĆ I STREFY RYNKU:
+PŁYNNOŚĆ I STREFY RYNKU (WIELOGIEŁDOWE):
 {json.dumps(liquidity_data, indent=2)}
 
 Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
@@ -311,7 +347,7 @@ Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
 3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa). Opisz w prostych akapitach, czy warto szukać pozycji długich (Long) czy krótkich (Short), podając czytelne strefy wejścia, poziom obrony (Stop Loss), cel (Take Profit) oraz bezpieczną wielkość pozycji.
 
 BEZWZGLĘDNE ZASADY:
-- Zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych typu `\\,`). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
+- Zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
 - Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień, bez przytłaczania surowymi rzędami cyfr wskaźników.
 """
 
@@ -335,7 +371,7 @@ BEZWZGLĘDNE ZASADY:
                 return None
 
 
-# --- 5. FTP & TELEGRAM (Z POPRAWIONYM PARSE_MODE) ---
+# --- 5. FTP & TELEGRAM ---
 def upload_to_ftp(html_content):
     if not all([FTP_HOST, FTP_USER, FTP_PASS]):
         print("Błąd: Brak pełnej konfiguracji zmiennych środowiskowych FTP.")
@@ -360,7 +396,7 @@ def upload_to_ftp(html_content):
                 f.write(html_content)
                 
             with open(temp_filename, "rb") as f:
-                ftp.storbinary("STOR index.html", f)
+                ftp.storbinary(f"STOR index.html", f)
                 
             os.remove(temp_filename)
             print("Sukces! Raport HTML zaktualizowany na serwerze: https://piwecki.pl/analiza/")
@@ -376,7 +412,7 @@ def send_telegram_message(text):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
-        "parse_mode": "HTML"  # Poprawione formatowanie (wcześniejsza literówka wyeliminowana)
+        "parse_mode": "HTML"
     }
     data = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
@@ -391,7 +427,7 @@ def send_telegram_message(text):
 
 # --- 6. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start cyklu analitycznego BTC & NEAR...")
+    print("Start cyklu analitycznego BTC & NEAR (wielogiełdowy skan)...")
     async with aiohttp.ClientSession() as session:
         btc_data = {}
         near_data = {}
