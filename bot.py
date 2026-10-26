@@ -639,7 +639,7 @@ async def fetch_okx_top_extremes(session):
     return results
 
 
-# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI (gemini-3.8-flash) ---
+# --- 5. GENEROWANIE RAPORTU PRZEZ GEMINI (Z OBSŁUGĄ BŁĘDÓW 503) ---
 async def generate_ai_report(btc_tech, alt_scans, deriv_data, pattern_summary):
     if not GEMINI_API_KEY:
         raise RuntimeError("Brak klucza API Gemini (GEMINI_API_KEY).")
@@ -667,24 +667,30 @@ Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z następującymi kluczami:
 3. "telegram_msg_signals": Treść wiadomości Telegram nr 2 – Top Selekcja Altcoinowa (2-3 najlepsze okazje oparte o płynne pary USDT/USDC na OKX, ze strefą wejścia, SL, TP oraz bezpiecznymi widełkami pozycji).
 
 BEZWZGLĘDNE ZASADY:
-- Zakaz stosowania formatowania LaTeX (zakaz używania ukośników wstecznych przy liczbach, np. zapisuj ceny wyłącznie w czystym formacie typu `$81,500` lub `$4.55`).
+- Zakaz stosowania formatowania LaTeX (zakaz używania ukośników wstecznych przy liczbach, np. zapisuj ceny wyłącznie w czystym formacie typu $81,500 lub $4.55).
 """
 
-    response = client.models.generate_content(
-        model="gemini-3.8-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.2
-        ),
-    )
-    
-    try:
-        return json.loads(response.text)
-    except Exception as e:
-        print(f"Błąd parsowania JSON z odpowiedzi Gemini: {e}")
-        return None
-
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.8-flash",
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    temperature=0.2
+                ),
+            )
+            return json.loads(response.text)
+        except Exception as e:
+            print(f"Próba {attempt + 1}/{max_retries} nie powiodła się (błąd AI/sieci): {e}")
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 5
+                print(f"Czekam {wait_time} sekund przed ponowieniem...")
+                await asyncio.sleep(wait_time)
+            else:
+                print("Wszystkie próby połączenia z modelem AI zakończyły się niepowodzeniem.")
+                return None
 
 # --- 6. FTP UPLOAD & TELEGRAM SENDER ---
 def upload_to_ftp(html_content):
