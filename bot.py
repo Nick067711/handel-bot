@@ -7,13 +7,14 @@ import urllib.request
 import urllib.parse
 import numpy as np
 from datetime import datetime, timezone
-from google import genai
-from google.genai import types
+import anthropic
+from openai import OpenAI
 
 # --- KONFIGURACJA ŚRODOWISKOWA / API ---
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
 FTP_USER = os.getenv("FTP_USER", "")
@@ -196,7 +197,6 @@ async def fetch_aggregated_market_data(session, symbol, bar):
 
     decimals = 4 if symbol == "NEAR" else 2
 
-    # Zwracamy wyłącznie zagregowane wskaźniki (bez ciężkich tablic surowych cen)
     return {
         "close": round(float(np.mean([d["close"] for d in valid_indicators])), decimals),
         "rsi": round(float(np.mean([d["rsi"] for d in valid_indicators])), 2),
@@ -308,13 +308,8 @@ async def fetch_multi_exchange_liquidity(session):
     return liquidity_data
 
 
-# --- 4. ANALIZA AI (Z ROZBUDOWANYMI PONOWIENIAMI DLA BŁĘDÓW 503) ---
-async def generate_ai_report(btc_data, near_data, liquidity_data):
-    if not GEMINI_API_KEY:
-        raise RuntimeError("Brak klucza API Gemini.")
-        
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    
+# --- 4. ANALIZA AI (CLAUDE JAKO GŁÓWNY, GPT-4O JAKO FAILOVER) ---
+def generate_ai_report(btc_data, near_data, liquidity_data):
     prompt = f"""
 Jesteś profesjonalnym doradcą day tradingu skupionym na korelacji Bitcoina (BTC) i NEAR.
 Przeanalizuj poniższe gotowe wskaźniki rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) z interwałów 1h, 4h oraz 1d:
@@ -338,28 +333,73 @@ BEZWZGLĘDNE ZASADY:
 - Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
 """
 
-    max_retries = 5
-    for attempt in range(max_retries):
+    # 1. PRÓBA: CLAUDE (ANTHROPIC)
+    if ANTHROPIC_API_KEY:
         try:
-            print(f"Wysyłam zapytanie do Gemini (próba {attempt + 1}/{max_retries})...")
-            response = client.models.generate_content(
-                model="gemini-3.8-flash",
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    temperature=0.2
-                ),
+            print("Wysyłam zapytanie do Claude (Anthropic)...")
+            client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+            message = client.messages.create(
+                model="claude-3-5-sonnet-20241022",
+                max_tokens=4000,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}]
             )
-            return json.loads(response.text)
+            raw_text = message.content[0].text
+            # Czyszczenie odpowiedzi w razie otoczenia blokiem ```json ... ```
+            if "```json" in raw_text:
+                raw_text = raw_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in raw_text:
+                raw_text = raw_text.split("```")[1].split("```")[0].strip()
+                
+            data = json.loads(raw_text)
+            
+            # Doklejamy podpis o modelu
+            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Claude 3.5 Sonnet</small>"
+            tg_sig = "\n\n<i>Analiza przygotowana przez: Claude 3.5 Sonnet</i>"
+            
+            if "html_content" in data and "</body>" in data["html_content"]:
+                data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
+            if "telegram_msg_btc" in data:
+                data["telegram_msg_btc"] += tg_sig
+                
+            print("Sukces! Analiza wygenerowana przez Claude.")
+            return data
         except Exception as e:
-            print(f"Próba {attempt + 1} nie powiodła się: {e}")
-            if attempt < max_retries - 1:
-                sleep_time = (attempt + 1) * 10  # Rosnący odstęp: 10s, 20s, 30s, 40s
-                print(f"Czekam {sleep_time} sekund przed ponowieniem próby...")
-                await asyncio.sleep(sleep_time)
-            else:
-                print("Wszystkie próby połączenia z AI wyczerpane.")
-                return None
+            print(f"Claude API error: {e}. Przełączam na zapasowy model OpenAI...")
+
+    # 2. PRÓBA (FAILOVER): OPENAI GPT-4O
+    if OPENAI_API_KEY:
+        try:
+            print("Wysyłam zapytanie do ChatGPT (OpenAI GPT-4o)...")
+            client = OpenAI(api_key=OPENAI_API_KEY)
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "Jesteś profesjonalnym analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2
+            )
+            raw_text = response.choices[0].message.content
+            data = json.loads(raw_text)
+            
+            # Doklejamy podpis o modelu
+            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: OpenAI GPT-4o</small>"
+            tg_sig = "\n\n<i>Analiza przygotowana przez: OpenAI GPT-4o</i>"
+            
+            if "html_content" in data and "</body>" in data["html_content"]:
+                data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
+            if "telegram_msg_btc" in data:
+                data["telegram_msg_btc"] += tg_sig
+                
+            print("Sukces! Analiza wygenerowana przez OpenAI GPT-4o.")
+            return data
+        except Exception as e:
+            print(f"OpenAI API error: {e}")
+
+    print("Wszystkie modele AI zawiodły.")
+    return None
 
 
 # --- 5. FTP & TELEGRAM ---
@@ -428,7 +468,7 @@ async def main():
             
         liquidity_data = await fetch_multi_exchange_liquidity(session)
         
-        report_data = await generate_ai_report(btc_data, near_data, liquidity_data)
+        report_data = generate_ai_report(btc_data, near_data, liquidity_data)
         
         if report_data and report_data.get("html_content"):
             upload_to_ftp(report_data["html_content"])
@@ -440,7 +480,7 @@ async def main():
             if report_data.get("telegram_msg_signals"):
                 send_telegram_message(report_data["telegram_msg_signals"])
         else:
-            print("Ostrzeżenie: Model AI nie zwrócił odpowiedzi. Wysyłam awaryjny HTML na FTP...")
+            print("Ostrzeżenie: Modele AI nie zwróciły odpowiedzi. Wysyłam awaryjny HTML na FTP...")
             fallback_html = f"""
             <!DOCTYPE html>
             <html lang="pl">
@@ -456,7 +496,7 @@ async def main():
             <body>
                 <div class="box">
                     <h2>Market Maker Monitor - BTC & NEAR</h2>
-                    <p>Trwa aktualizacja danych rynkowych. Model AI generuje bieżącą analizę...</p>
+                    <p>Trwa aktualizacja danych rynkowych. Modele AI generują bieżącą analizę...</p>
                     <p><small>Ostatnia próba: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</small></p>
                 </div>
             </body>
