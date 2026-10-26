@@ -20,7 +20,7 @@ FTP_USER = os.getenv("FTP_USER", "")
 FTP_PASS = os.getenv("FTP_PASS", "")
 FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ (Wieloresolucyjny dla BTC i NEAR) ---
+# --- 1. SILNIK ANALIZY TECHNICZNEJ (Wielorezolucyjny dla BTC i NEAR) ---
 class TradeEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -104,7 +104,7 @@ class TradeEngine:
         return round(float(((rsi_series[-1] - min_rsi) / (max_rsi - min_rsi)) * 100), 2)
 
 
-# --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD (OKX, Binance, Kraken, Bybit) ---
+# --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD ---
 async def fetch_okx_candles(session, symbol, bar):
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D"}
     inst_id = f"{symbol}-USDT-SWAP"
@@ -210,7 +210,7 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. AGREGACJA PŁYNNOŚCI I ORDERBOOKÓW ZE WSZYSTKICH GIEŁD ---
+# --- 3. PŁYNNOŚĆ I ORDERBOOKI ---
 def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     bin_size = 500.0 if is_btc else 0.05
     token_name = "BTC" if is_btc else "NEAR"
@@ -241,8 +241,6 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
 
 async def fetch_multi_exchange_liquidity(session):
     liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak"}
-    
-    # BTC Order Books (OKX, Binance, Bybit, Kraken)
     btc_walls = []
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=200", timeout=5) as resp:
@@ -263,7 +261,6 @@ async def fetch_multi_exchange_liquidity(session):
         ask_z, bid_z = aggregate_baskets_to_zones(btc_walls, 80000.0, is_btc=True)
         liquidity_data["btc_liquidation_map"] = f"Ask: {ask_z} | Bid: {bid_z}"
 
-    # NEAR Order Books (OKX, Binance)
     near_walls = []
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=200", timeout=5) as resp:
@@ -287,16 +284,16 @@ async def fetch_multi_exchange_liquidity(session):
     return liquidity_data
 
 
-# --- 4. ANALIZA AI (Decyzja o wysyłce na Telegram) ---
-async def generate_ai_trade_decision(btc_data, near_data, liquidity_data):
+# --- 4. ANALIZA AI (Zwracająca 2 wiadomości Telegram + HTML) ---
+async def generate_ai_report(btc_data, near_data, liquidity_data):
     if not GEMINI_API_KEY:
         raise RuntimeError("Brak klucza API Gemini.")
         
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
-Jesteś zaawansowanym algorytmem Day Trading Market Maker Monitor skupionym WYŁĄCZNIE na korelacji między BTC a NEAR.
-Przeanalizuj dane z wielu giełd (OKX, Binance, Bybit, Kraken) dla obu aktywów:
+Jesteś zaawansowanym systemem analitycznym Market Maker Monitor skupionym na korelacji BTC oraz NEAR.
+Przeanalizuj poniższe dane rynkowe:
 
 BTC WIEŁOINTERWAŁOWE DANE (1h, 4h, 1d):
 {json.dumps(btc_data, indent=2)}
@@ -304,21 +301,16 @@ BTC WIEŁOINTERWAŁOWE DANE (1h, 4h, 1d):
 NEAR WIELOINTERWAŁOWE DANE (1h, 4h, 1d):
 {json.dumps(near_data, indent=2)}
 
-PŁYNNOŚĆ I ŚCIANY ZLECEN ZE WSZYSTKICH GIEŁD:
+PŁYNNOŚĆ I ORDERBOOKI ZE WSZYSTKICH GIEŁD:
 {json.dumps(liquidity_data, indent=2)}
 
-Zadanie:
-1. Oceń, czy występuje klarowna, silna okazja pod day trading (Long/Short) dla BTC lub NEAR w oparciu o ekstremalne RSI, StochRSI lub testy kluczowych barier i korelację.
-2. Jeśli sytuacja jest płaska lub neutralna, ustaw "signal_triggered" na false.
-3. Jeśli widzisz konkretny, bezpieczny układ z wysokim prawdopodobieństwem zysku, ustaw "signal_triggered" na true i przygotuj treść komunikatu na Telegram.
+Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
+1. "html_content": pełny kod HTML raportu dla strony internetowej https://piwecki.pl/analiza/ (ciemny motyw, czytelna struktura).
+2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, BTC & NEAR, korelacja, wskaźniki i strefy płynności).
+3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Top Okazje Day Trading / Sygnał dla BTC lub NEAR ze strefą wejścia, Stop Loss, Take Profit oraz bezpiecznymi widełkami pozycji).
 
-Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z kluczami:
-- "html_content": pełny kod HTML raportu dla strony https://piwecki.pl/analiza/
-- "signal_triggered": boolean (true/false)
-- "telegram_message": treść powiadomienia (tylko gdy signal_triggered = true, w przeciwnym razie pusty string).
-
-ZASADA:
-- Bezwzględny zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych typu `\\,`). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
+BEZWZGLĘDNE ZASADY:
+- Zakaz stosowania formatowania LaTeX (zakaz używania ukośników wstecznych przy liczbach typu `\\,`). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
 """
 
     max_retries = 3
@@ -369,45 +361,51 @@ def send_telegram_message(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not text:
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text
+        # Celowo brak parse_mode, aby uniemożliwić błędy składniowe
+    }
     data = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=10) as response:
-            pass
+            res_data = json.loads(response.read().decode("utf-8"))
+            if not res_data.get("ok"):
+                print(f"Telegram API error: {res_data}")
     except Exception as e:
         print(f"Błąd wysyłki Telegram: {e}")
 
 
 # --- 6. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start cyklu analitycznego BTC & NEAR (wielogiełdowy skan)...")
+    print("Start cyklu analitycznego BTC & NEAR...")
     async with aiohttp.ClientSession() as session:
-        # Pobieranie wielointerwałowych danych z wielu giełd dla BTC i NEAR
         btc_data = {}
         near_data = {}
         for tf in ["1h", "4h", "1d"]:
             btc_data[tf] = await fetch_aggregated_market_data(session, "BTC", tf)
             near_data[tf] = await fetch_aggregated_market_data(session, "NEAR", tf)
             
-        # Agregacja płynności orderbooków z wielu giełd
         liquidity_data = await fetch_multi_exchange_liquidity(session)
         
-        # Ocena AI i decyzja o sygnale
-        result = await generate_ai_trade_decision(btc_data, near_data, liquidity_data)
-        if not result:
-            print("Brak odpowiedzi od modelu AI.")
+        report_data = await generate_ai_report(btc_data, near_data, liquidity_data)
+        if not report_data:
+            print("Brak odpowiedzi od modelu AI - pomijam wysyłkę.")
             return
             
-        # Zawsze aktualizujemy stronę HTML na serwerze (archiwum i podgląd)
-        upload_to_ftp(result.get("html_content", ""))
+        # Zawsze aktualizujemy raport HTML na serwerze
+        upload_to_ftp(report_data.get("html_content", ""))
         
-        # Wysyłamy powiadomienie na Telegram TYLKO wtedy, gdy AI potwierdzi sygnał handlowy
-        if result.get("signal_triggered") and result.get("telegram_message"):
-            print("Wykryto okazję day tradingową na BTC/NEAR! Wysyłam alert na Telegram...")
-            send_telegram_message(result["telegram_message"])
-        else:
-            print("Brak mocnego sygnału wejścia – powiadomienie na Telegram pominięte.")
+        # Wysyłka dwóch niezależnych wiadomości na Telegram (czysty tekst bez błędów)
+        if report_data.get("telegram_msg_btc"):
+            send_telegram_message(report_data["telegram_msg_btc"])
+            await asyncio.sleep(1.5)
+            
+        if report_data.get("telegram_msg_signals"):
+            send_telegram_message(report_data["telegram_msg_signals"])
+            
+    print("Cykl analityczny zakończony pomyślnie.")
 
 if __name__ == "__main__":
     asyncio.run(main())
