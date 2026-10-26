@@ -284,7 +284,7 @@ async def fetch_multi_exchange_liquidity(session):
     return liquidity_data
 
 
-# --- 4. ANALIZA AI (Zwracająca 2 wiadomości Telegram + HTML) ---
+# --- 4. ANALIZA AI ---
 async def generate_ai_report(btc_data, near_data, liquidity_data):
     if not GEMINI_API_KEY:
         raise RuntimeError("Brak klucza API Gemini.")
@@ -295,7 +295,7 @@ async def generate_ai_report(btc_data, near_data, liquidity_data):
 Jesteś zaawansowanym systemem analitycznym Market Maker Monitor skupionym na korelacji BTC oraz NEAR.
 Przeanalizuj poniższe dane rynkowe:
 
-BTC WIEŁOINTERWAŁOWE DANE (1h, 4h, 1d):
+BTC WIELOINTERWAŁOWE DANE (1h, 4h, 1d):
 {json.dumps(btc_data, indent=2)}
 
 NEAR WIELOINTERWAŁOWE DANE (1h, 4h, 1d):
@@ -333,29 +333,45 @@ BEZWZGLĘDNE ZASADY:
                 return None
 
 
-# --- 5. FTP & TELEGRAM HANDLERS ---
+# --- 5. FTP (Zwykłe FTP bez TLS + pełne logowanie) & TELEGRAM ---
 def upload_to_ftp(html_content):
     if not all([FTP_HOST, FTP_USER, FTP_PASS]):
-        return
+        print("Błąd: Brak pełnej konfiguracji zmiennych środowiskowych FTP (HOST, USER, PASS).")
+        return False
+        
     try:
-        with ftplib.FTP_TLS(FTP_HOST) as ftp:
+        print(f"Łączenie z serwerem FTP: {FTP_HOST} (zwykłe FTP)...")
+        with ftplib.FTP(FTP_HOST, timeout=15) as ftp:
+            print("Połączono z serwerem. Logowanie...")
             ftp.login(FTP_USER, FTP_PASS)
-            ftp.prot_p()
+            print("Zalogowano pomyślnie.")
+            
             dirs = FTP_DIR.split("/")
             for d in dirs:
                 if d:
-                    try: ftp.cwd(d)
+                    try:
+                        ftp.cwd(d)
+                        print(f"Przejściu do katalogu: {d}")
                     except ftplib.error_perm:
+                        print(f"Katalog {d} nie istnieje. Próbuję utworzyć...")
                         ftp.mkd(d)
                         ftp.cwd(d)
-            with open("index.html", "w", encoding="utf-8") as f:
+                        print(f"Utworzono i weszto do: {d}")
+                        
+            temp_filename = "index.html"
+            with open(temp_filename, "w", encoding="utf-8") as f:
                 f.write(html_content)
-            with open("index.html", "rb") as f:
-                ftp.storbinary("STOR index.html", f)
-            os.remove("index.html")
-            print("Raport HTML pomyślnie zaktualizowany na serwerze.")
+                
+            print("Wysyłanie pliku index.html na serwer...")
+            with open(temp_filename, "rb") as f:
+                ftp.storbinary(f"STOR index.html", f)
+                
+            os.remove(temp_filename)
+            print("Sukces! Raport HTML pomyślnie zaktualizowany na serwerze: https://piwecki.pl/analiza/")
+            return True
     except Exception as e:
-        print(f"Błąd FTP: {e}")
+        print(f"Szczegółowy błąd FTP: {e}")
+        return False
 
 def send_telegram_message(text):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not text:
@@ -364,7 +380,6 @@ def send_telegram_message(text):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text
-        # Celowo brak parse_mode, aby uniemożliwić błędy składniowe
     }
     data = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
@@ -394,10 +409,8 @@ async def main():
             print("Brak odpowiedzi od modelu AI - pomijam wysyłkę.")
             return
             
-        # Zawsze aktualizujemy raport HTML na serwerze
         upload_to_ftp(report_data.get("html_content", ""))
         
-        # Wysyłka dwóch niezależnych wiadomości na Telegram (czysty tekst bez błędów)
         if report_data.get("telegram_msg_btc"):
             send_telegram_message(report_data["telegram_msg_btc"])
             await asyncio.sleep(1.5)
