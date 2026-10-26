@@ -1,4 +1,3 @@
 aiohttp
 numpy
-anthropic
 openai
