@@ -425,9 +425,9 @@ def send_telegram_message(text):
         print(f"Błąd wysyłki Telegram: {e}")
 
 
-# --- 6. GŁÓWNA FUNKCJA ---
+# --- 6. GŁÓWNA FUNKCJA (Z ODPRONŚCIĄ NA BŁĘDY AI) ---
 async def main():
-    print("Start cyklu analitycznego BTC & NEAR (wielogiełdowy skan)...")
+    print("Start cyklu analitycznego BTC & NEAR...")
     async with aiohttp.ClientSession() as session:
         btc_data = {}
         near_data = {}
@@ -437,21 +437,44 @@ async def main():
             
         liquidity_data = await fetch_multi_exchange_liquidity(session)
         
+        # Próba uzyskania raportu z AI
         report_data = await generate_ai_report(btc_data, near_data, liquidity_data)
-        if not report_data:
-            print("Brak odpowiedzi od modelu AI - pomijam wysyłkę.")
-            return
-            
-        upload_to_ftp(report_data.get("html_content", ""))
         
-        if report_data.get("telegram_msg_btc"):
-            send_telegram_message(report_data["telegram_msg_btc"])
-            await asyncio.sleep(1.5)
+        if report_data and report_data.get("html_content"):
+            # Pełny sukces - wysyłamy raport AI na FTP i Telegram
+            upload_to_ftp(report_data["html_content"])
             
-        if report_data.get("telegram_msg_signals"):
-            send_telegram_message(report_data["telegram_msg_signals"])
+            if report_data.get("telegram_msg_btc"):
+                send_telegram_message(report_data["telegram_msg_btc"])
+                await asyncio.sleep(1.5)
+                
+            if report_data.get("telegram_msg_signals"):
+                send_telegram_message(report_data["telegram_msg_signals"])
+        else:
+            print("Ostrzeżenie: Model AI nie zwrócił odpowiedzi (chwilowy problem z API). Wysyłam awaryjny raport na FTP...")
             
-    print("Cykl analityczny zakończony pomyślnie.")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+            # Awaryjny HTML, żeby strona na FTP ZAWSZE się zaktualizowała i nie wisiała
+            fallback_html = f"""
+            <!DOCTYPE html>
+            <html lang="pl">
+            <head>
+                <meta charset="UTF-8">
+                <title>Market Maker Monitor - BTC & NEAR</title>
+                <style>
+                    body {{ background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; text-align: center; padding-top: 50px; }}
+                    .box {{ background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; max-width: 600px; }}
+                    h2 {{ color: #ff9800; }}
+                </style>
+            </head>
+            <body>
+                <div class="box">
+                    <h2>Market Maker Monitor - BTC & NEAR</h2>
+                    <p>Trwa aktualizacja danych rynkowych. Model AI generuje bieżącą analizę...</p>
+                    <p><small>Ostatnia próba: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</small></p>
+                </div>
+            </body>
+            </html>
+            """
+            upload_to_ftp(fallback_html)
+            
+    print("Cykl analityczny zakończony.")
