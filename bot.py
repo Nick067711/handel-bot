@@ -173,11 +173,9 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
     valid_indicators = []
-    valid_closes_list = []
     
     for closes in results:
         if isinstance(closes, list) and len(closes) >= 15:
-            valid_closes_list.append(closes)
             rsi = TradeEngine.calculate_rsi(closes)
             ema20 = TradeEngine.calculate_ema(closes, 20)
             ema50 = TradeEngine.calculate_ema(closes, 50)
@@ -194,19 +192,18 @@ async def fetch_aggregated_market_data(session, symbol, bar):
             })
 
     if not valid_indicators:
-        return {"close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "raw_closes": []}
+        return {"close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0}
 
     decimals = 4 if symbol == "NEAR" else 2
-    best_raw_closes = max(valid_closes_list, key=len) if valid_closes_list else []
 
+    # Zwracamy wyłącznie zagregowane wskaźniki (bez ciężkich tablic surowych cen)
     return {
         "close": round(float(np.mean([d["close"] for d in valid_indicators])), decimals),
         "rsi": round(float(np.mean([d["rsi"] for d in valid_indicators])), 2),
         "stoch_k": round(float(np.mean([d["stoch_k"] for d in valid_indicators])), 2),
         "macd_hist": round(float(np.mean([d["macd_hist"] for d in valid_indicators])), 4),
         "ema20": round(float(np.mean([d["ema20"] for d in valid_indicators])), decimals),
-        "ema50": round(float(np.mean([d["ema50"] for d in valid_indicators])), decimals),
-        "raw_closes": best_raw_closes
+        "ema50": round(float(np.mean([d["ema50"] for d in valid_indicators])), decimals)
     }
 
 
@@ -311,7 +308,7 @@ async def fetch_multi_exchange_liquidity(session):
     return liquidity_data
 
 
-# --- 4. ANALIZA AI ---
+# --- 4. ANALIZA AI (Z ROZBUDOWANYMI PONOWIENIAMI DLA BŁĘDÓW 503) ---
 async def generate_ai_report(btc_data, near_data, liquidity_data):
     if not GEMINI_API_KEY:
         raise RuntimeError("Brak klucza API Gemini.")
@@ -320,7 +317,7 @@ async def generate_ai_report(btc_data, near_data, liquidity_data):
     
     prompt = f"""
 Jesteś profesjonalnym doradcą day tradingu skupionym na korelacji Bitcoina (BTC) i NEAR.
-Przeanalizuj poniższe dane rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) z interwałów 1h, 4h oraz 1d:
+Przeanalizuj poniższe gotowe wskaźniki rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) z interwałów 1h, 4h oraz 1d:
 
 BTC DANE:
 {json.dumps(btc_data, indent=2)}
@@ -341,9 +338,10 @@ BEZWZGLĘDNE ZASADY:
 - Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
 """
 
-    max_retries = 3
+    max_retries = 5
     for attempt in range(max_retries):
         try:
+            print(f"Wysyłam zapytanie do Gemini (próba {attempt + 1}/{max_retries})...")
             response = client.models.generate_content(
                 model="gemini-3.8-flash",
                 contents=prompt,
@@ -356,8 +354,11 @@ BEZWZGLĘDNE ZASADY:
         except Exception as e:
             print(f"Próba {attempt + 1} nie powiodła się: {e}")
             if attempt < max_retries - 1:
-                await asyncio.sleep(5)
+                sleep_time = (attempt + 1) * 10  # Rosnący odstęp: 10s, 20s, 30s, 40s
+                print(f"Czekam {sleep_time} sekund przed ponowieniem próby...")
+                await asyncio.sleep(sleep_time)
             else:
+                print("Wszystkie próby połączenia z AI wyczerpane.")
                 return None
 
 
