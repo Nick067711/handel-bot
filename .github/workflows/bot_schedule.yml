@@ -2,8 +2,7 @@ name: Market Maker Monitor Schedule
 
 on:
   schedule:
-    # Uruchamianie co 6 godzin
-    - cron: '0 */6 * * *'
+    - cron: '0 * * * *' # Uruchomienie co godzinę
   workflow_dispatch:
 
 jobs:
