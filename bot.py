@@ -451,7 +451,6 @@ async def main():
             
         liquidity_data = await fetch_multi_exchange_liquidity(session)
         
-        # Symulacja wstępnych sygnałów z silnika backtestu (model AN-1 / dna, szczyty, prawdopodobieństwo)
         backtest_signals = {
             "model_zgodnosc": "Wysoka (kalibracja 2020-2026)",
             "btc_szansa_wzrostu_7dni": "Szacowana na podstawie modelu cyklu",
