@@ -319,7 +319,7 @@ BEZWZGLĘDNE ZASADY:
 - Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
 """
 
-    primary_model = "llama-3.3-70b-versatile"
+    primary_model = "llama3-70b-8192"
     max_retries = 3
     
     for attempt in range(max_retries):
@@ -337,8 +337,8 @@ BEZWZGLĘDNE ZASADY:
             raw_text = response.choices[0].message.content
             data = json.loads(raw_text)
             
-            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3.3 70B (Groq)</small>"
-            tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3.3 70B (Groq)</i>"
+            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3 70B (Groq)</small>"
+            tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3 70B (Groq)</i>"
             
             if "html_content" in data and "</body>" in data["html_content"]:
                 data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
@@ -352,7 +352,7 @@ BEZWZGLĘDNE ZASADY:
                 import time
                 time.sleep(5)
 
-    backup_model = "llama-3.1-8b-instant"
+    backup_model = "llama3-8b-8192"
     print(f"Tor główny zawiódł. Przełączam na drugi tor zapasowy: {backup_model}...")
     
     try:
@@ -368,8 +368,8 @@ BEZWZGLĘDNE ZASADY:
         raw_text = response.choices[0].message.content
         data = json.loads(raw_text)
         
-        model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3.1 8B (Groq)</small>"
-        tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3.1 8B (Groq)</i>"
+        model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3 8B (Groq)</small>"
+        tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3 8B (Groq)</i>"
         
         if "html_content" in data and "</body>" in data["html_content"]:
             data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
