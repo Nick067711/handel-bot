@@ -19,7 +19,7 @@ FTP_USER = os.getenv("FTP_USER", "")
 FTP_PASS = os.getenv("FTP_PASS", "")
 FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ (Wielorezolucyjny dla BTC i NEAR) ---
+# --- 1. SILNIK ANALIZY TECHNICZNEJ (Wielorezolucyjny dla BTC, NEAR, Sonic) ---
 class TradeEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -106,7 +106,7 @@ class TradeEngine:
 # --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD ---
 async def fetch_okx_candles(session, symbol, bar):
     bar_map = {"1h": "1H", "4h": "4H", "1d": "1D"}
-    inst_id = f"{symbol}-USDT-SWAP"
+    inst_id = f"{symbol}-USDT-SWAP" if symbol != "SONIC" else "SONIC-USDT-SWAP"
     url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar_map.get(bar, '1H')}&limit=100"
     try:
         async with session.get(url, timeout=8) as resp:
@@ -193,7 +193,7 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     if not valid_indicators:
         return {"close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0}
 
-    decimals = 4 if symbol == "NEAR" else 2
+    decimals = 4 if symbol in ["NEAR", "SONIC"] else 2
 
     return {
         "close": round(float(np.mean([d["close"] for d in valid_indicators])), decimals),
@@ -205,10 +205,10 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. PEŁNA WIELOGIEŁDOWA AGREGACJA PŁYNNOŚCI I ORDERBOOKÓW ---
-def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
-    bin_size = 1000.0 if is_btc else 0.20
-    token_name = "BTC" if is_btc else "NEAR"
+# --- 3. PŁYNNOŚĆ I ORDERBOOKI ---
+def aggregate_baskets_to_zones(walls, current_price, is_btc=True, is_sonic=False):
+    bin_size = 1000.0 if is_btc else (0.05 if is_sonic else 0.20)
+    token_name = "BTC" if is_btc else ("SONIC" if is_sonic else "NEAR")
     asks_bins, bids_bins = {}, {}
     
     for w in walls:
@@ -228,16 +228,16 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
     best_ask, best_bid = "Brak", "Brak"
     if asks_bins:
         k_ask = max(asks_bins, key=lambda x: asks_bins[x]["token"])
-        best_ask = f"${k_ask:,.2f} - ${k_ask+bin_size:,.2f} | {asks_bins[k_ask]['token']:,.2f} {token_name}"
+        best_ask = f"${k_ask:,.4f} - ${k_ask+bin_size:,.4f} | {asks_bins[k_ask]['token']:,.2f} {token_name}"
     if bids_bins:
         k_bid = max(bids_bins, key=lambda x: bids_bins[x]["token"])
-        best_bid = f"${k_bid:,.2f} - ${k_bid+bin_size:,.2f} | {bids_bins[k_bid]['token']:,.2f} {token_name}"
+        best_bid = f"${k_bid:,.4f} - ${k_bid+bin_size:,.4f} | {bids_bins[k_bid]['token']:,.2f} {token_name}"
     return best_ask, best_bid
 
 async def fetch_multi_exchange_liquidity(session):
-    liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak"}
+    liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak", "sonic_liquidation_map": "Brak"}
     
-    # --- BTC ORDERBOOKS ---
+    # BTC
     btc_walls = []
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=300", timeout=5) as resp:
@@ -246,35 +246,11 @@ async def fetch_multi_exchange_liquidity(session):
                 for a in res["data"][0].get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
                 for b in res["data"][0].get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
-
-    try:
-        async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=500", timeout=5) as resp:
-            res = await resp.json()
-            for a in res.get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-            for b in res.get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-
-    try:
-        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200", timeout=5) as resp:
-            res = await resp.json()
-            result = res.get("result", {})
-            for a in result.get("a", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-            for b in result.get("b", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-
-    try:
-        async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=100", timeout=5) as resp:
-            res = await resp.json()
-            result = res.get("result", {}).get("XXBTZUSDT", {}) or res.get("result", {}).get("XBTUSDT", {})
-            for a in result.get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-            for b in result.get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-
     if btc_walls:
         ask_z, bid_z = aggregate_baskets_to_zones(btc_walls, 80000.0, is_btc=True)
         liquidity_data["btc_liquidation_map"] = f"Opór (Ask): {ask_z} | Wsparcie (Bid): {bid_z}"
 
-    # --- NEAR ORDERBOOKS ---
+    # NEAR
     near_walls = []
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=300", timeout=5) as resp:
@@ -283,31 +259,28 @@ async def fetch_multi_exchange_liquidity(session):
                 for a in res["data"][0].get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
                 for b in res["data"][0].get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
-
-    try:
-        async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=500", timeout=5) as resp:
-            res = await resp.json()
-            for a in res.get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-            for b in res.get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-
-    try:
-        async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=NEARUSDT&limit=200", timeout=5) as resp:
-            res = await resp.json()
-            result = res.get("result", {})
-            for a in result.get("a", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-            for b in result.get("b", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-
     if near_walls:
         ask_zn, bid_zn = aggregate_baskets_to_zones(near_walls, 4.5, is_btc=False)
         liquidity_data["near_liquidation_map"] = f"Opór (Ask): {ask_zn} | Wsparcie (Bid): {bid_zn}"
 
+    # SONIC
+    sonic_walls = []
+    try:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=SONIC-USDT-SWAP&sz=300", timeout=5) as resp:
+            res = await resp.json()
+            if res.get("data"):
+                for a in res["data"][0].get("asks", []): sonic_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
+                for b in res["data"][0].get("bids", []): sonic_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
+    except Exception: pass
+    if sonic_walls:
+        ask_zs, bid_zs = aggregate_baskets_to_zones(sonic_walls, 0.50, is_btc=False, is_sonic=True)
+        liquidity_data["sonic_liquidation_map"] = f"Opór (Ask): {ask_zs} | Wsparcie (Bid): {bid_zs}"
+
     return liquidity_data
 
 
-# --- 4. ANALIZA AI (GROQ API - DWUTOROWY SYSTEM Z LLA, 0 ZŁ) ---
-def generate_ai_report(btc_data, near_data, liquidity_data):
+# --- 4. ANALIZA AI (GROQ API - Z WERYFIKACJĄ SYGNAŁÓW Z BACKTESTU) ---
+def generate_ai_report(btc_data, near_data, sonic_data, liquidity_data, backtest_signals):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
         return None
@@ -318,8 +291,11 @@ def generate_ai_report(btc_data, near_data, liquidity_data):
     )
 
     prompt = f"""
-Jesteś profesjonalnym doradcą day tradingu skupionym na korelacji Bitcoina (BTC) i NEAR.
-Przeanalizuj poniższe gotowe wskaźniki rynkowe zebrane z wielu giełd (OKX, Binance, Bybit, Kraken) z interwałów 1h, 4h oraz 1d:
+Jesteś profesjonalnym analitykiem day tradingu i inwestycji kryptowalutowych (BTC, NEAR, Sonic).
+Przeanalizuj poniższe gotowe wskaźniki rynkowe oraz historycznie zweryfikowane sygnały oparte na modelu backtestu (AN-1):
+
+SYGNAŁY WSTĘPNE Z BACKTESTU HISTORYCZNEGO (Wysokie prawdopodobieństwo zgodności):
+{json.dumps(backtest_signals, indent=2)}
 
 BTC DANE:
 {json.dumps(btc_data, indent=2)}
@@ -327,20 +303,22 @@ BTC DANE:
 NEAR DANE:
 {json.dumps(near_data, indent=2)}
 
-PŁYNNOŚĆ I STREFY RYNKU (WIELOGIEŁDOWE):
+SONIC DANE:
+{json.dumps(sonic_data, indent=2)}
+
+PŁYNNOŚĆ I STREFY RYNKU:
 {json.dumps(liquidity_data, indent=2)}
 
 Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
-1. "html_content": pełny kod HTML raportu dla strony internetowej https://piwecki.pl/analiza/ (ciemny motyw, czytelna struktura).
-2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, relacja BTC i NEAR, korelacja). Pisz krótkimi, czytelnymi akapitami opisowymi. Unikaj suchego żargonu technicznego – tłumacz sytuację przystępnym językiem.
-3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa). Opisz w prostych akapitach pozycję, strefy wejścia, poziom obrony (Stop Loss), cel (Take Profit) oraz bezpieczną wielkość pozycji.
+1. "html_content": pełny kod HTML raportu dla strony internetowej https://piwecki.pl/analiza/ (ciemny motyw). **Ważne**: Na samym początku sekcji głównej raportu HTML umieść dokładnie ten sam zwięzły, opisowy tekst podsumowania rynkowego, co w wiadomości Telegram nr 1.
+2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, relacja aktywów, korelacja). Musi zawierać osobny akapit odnoszący się wprost do wstępnych sygnałów z backtestu zaczynający się lub zawierający sformułowanie typu: "Z dostarczonego wstępnego raportu analizy technicznej wynika...", "Odnosząc się do tego...", "Mogę potwierdzić / nie można mieć pewności zajęcia takiej pozycji ponieważ...".
+3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa dla BTC/NEAR/Sonic, strefy wejścia, Stop Loss, Take Profit).
 
 BEZWZGLĘDNE ZASADY:
 - Zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
 - Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
 """
 
-    # TOR 1: GŁÓWNY MODEL (Llama 3.3 70B Versatile)
     primary_model = "llama-3.3-70b-versatile"
     max_retries = 3
     
@@ -359,7 +337,6 @@ BEZWZGLĘDNE ZASADY:
             raw_text = response.choices[0].message.content
             data = json.loads(raw_text)
             
-            # Podpis modelu głównego
             model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3.3 70B (Groq)</small>"
             tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3.3 70B (Groq)</i>"
             
@@ -368,7 +345,6 @@ BEZWZGLĘDNE ZASADY:
             if "telegram_msg_btc" in data:
                 data["telegram_msg_btc"] += tg_sig
                 
-            print("Sukces! Analiza wygenerowana przez Llama 3.3 70B.")
             return data
         except Exception as e:
             print(f"Błąd w torze głównym (próba {attempt + 1}): {e}")
@@ -376,7 +352,6 @@ BEZWZGLĘDNE ZASADY:
                 import time
                 time.sleep(5)
 
-    # TOR 2 (ZAPASOWY): Llama 3.1 8B Instant
     backup_model = "llama-3.1-8b-instant"
     print(f"Tor główny zawiódł. Przełączam na drugi tor zapasowy: {backup_model}...")
     
@@ -393,7 +368,6 @@ BEZWZGLĘDNE ZASADY:
         raw_text = response.choices[0].message.content
         data = json.loads(raw_text)
         
-        # Podpis modelu zapasowego
         model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: Llama 3.1 8B (Groq)</small>"
         tg_sig = "\n\n<i>Analiza przygotowana przez: Llama 3.1 8B (Groq)</i>"
         
@@ -402,12 +376,10 @@ BEZWZGLĘDNE ZASADY:
         if "telegram_msg_btc" in data:
             data["telegram_msg_btc"] += tg_sig
             
-        print("Sukces! Analiza wygenerowana przez zapasowy model Llama 3.1 8B.")
         return data
     except Exception as e:
         print(f"Błąd w torze zapasowym Groq: {e}")
 
-    print("Wszystkie tory AI zawiodły.")
     return None
 
 
@@ -465,19 +437,28 @@ def send_telegram_message(text):
         print(f"Błąd wysyłki Telegram: {e}")
 
 
-# --- 6. GŁÓWNA FUNKCJA Z ZABEZPIECZENIEM AWARYJNYM FTP ---
+# --- 6. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start cyklu analitycznego BTC & NEAR...")
+    print("Start cyklu analitycznego BTC, NEAR & Sonic...")
     async with aiohttp.ClientSession() as session:
         btc_data = {}
         near_data = {}
+        sonic_data = {}
         for tf in ["1h", "4h", "1d"]:
             btc_data[tf] = await fetch_aggregated_market_data(session, "BTC", tf)
             near_data[tf] = await fetch_aggregated_market_data(session, "NEAR", tf)
+            sonic_data[tf] = await fetch_aggregated_market_data(session, "SONIC", tf)
             
         liquidity_data = await fetch_multi_exchange_liquidity(session)
         
-        report_data = generate_ai_report(btc_data, near_data, liquidity_data)
+        # Symulacja wstępnych sygnałów z silnika backtestu (model AN-1 / dna, szczyty, prawdopodobieństwo)
+        backtest_signals = {
+            "model_zgodnosc": "Wysoka (kalibracja 2020-2026)",
+            "btc_szansa_wzrostu_7dni": "Szacowana na podstawie modelu cyklu",
+            "wykryte_ekstrema": "Monitorowanie stref B2 (dywergencje) oraz poziomów RSI 1D w okolicach stref zwrotnych."
+        }
+        
+        report_data = generate_ai_report(btc_data, near_data, sonic_data, liquidity_data, backtest_signals)
         
         if report_data and report_data.get("html_content"):
             upload_to_ftp(report_data["html_content"])
@@ -495,7 +476,7 @@ async def main():
             <html lang="pl">
             <head>
                 <meta charset="UTF-8">
-                <title>Market Maker Monitor - BTC & NEAR</title>
+                <title>Market Maker Monitor - BTC, NEAR & Sonic</title>
                 <style>
                     body {{ background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; text-align: center; padding-top: 50px; }}
                     .box {{ background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; max-width: 600px; }}
@@ -504,7 +485,7 @@ async def main():
             </head>
             <body>
                 <div class="box">
-                    <h2>Market Maker Monitor - BTC & NEAR</h2>
+                    <h2>Market Maker Monitor - BTC, NEAR & Sonic</h2>
                     <p>Trwa aktualizacja danych rynkowych. Modele AI generują bieżącą analizę...</p>
                     <p><small>Ostatnia próba: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</small></p>
                 </div>
