@@ -212,7 +212,6 @@ async def fetch_aggregated_market_data(session, symbol, bar):
 
 # --- 3. PEŁNA WIELOGIEŁDOWA AGREGACJA PŁYNNOŚCI I ORDERBOOKÓW ---
 def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
-    # Szersze zakresy dla day tradingu (1h/4h/1d)
     bin_size = 1000.0 if is_btc else 0.20
     token_name = "BTC" if is_btc else "NEAR"
     asks_bins, bids_bins = {}, {}
@@ -243,10 +242,8 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
 async def fetch_multi_exchange_liquidity(session):
     liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak"}
     
-    # --- BTC ORDERBOOKS (OKX, Binance, Bybit, Kraken) ---
+    # --- BTC ORDERBOOKS ---
     btc_walls = []
-    
-    # OKX BTC
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=300", timeout=5) as resp:
             res = await resp.json()
@@ -255,7 +252,6 @@ async def fetch_multi_exchange_liquidity(session):
                 for b in res["data"][0].get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
-    # Binance BTC
     try:
         async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=500", timeout=5) as resp:
             res = await resp.json()
@@ -263,7 +259,6 @@ async def fetch_multi_exchange_liquidity(session):
             for b in res.get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
-    # Bybit BTC
     try:
         async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=BTCUSDT&limit=200", timeout=5) as resp:
             res = await resp.json()
@@ -272,7 +267,6 @@ async def fetch_multi_exchange_liquidity(session):
             for b in result.get("b", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
-    # Kraken BTC
     try:
         async with session.get("https://api.kraken.com/0/public/Depth?pair=XBTUSDT&count=100", timeout=5) as resp:
             res = await resp.json()
@@ -285,10 +279,8 @@ async def fetch_multi_exchange_liquidity(session):
         ask_z, bid_z = aggregate_baskets_to_zones(btc_walls, 80000.0, is_btc=True)
         liquidity_data["btc_liquidation_map"] = f"Opór (Ask): {ask_z} | Wsparcie (Bid): {bid_z}"
 
-    # --- NEAR ORDERBOOKS (OKX, Binance, Bybit) ---
+    # --- NEAR ORDERBOOKS ---
     near_walls = []
-    
-    # OKX NEAR
     try:
         async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=300", timeout=5) as resp:
             res = await resp.json()
@@ -297,7 +289,6 @@ async def fetch_multi_exchange_liquidity(session):
                 for b in res["data"][0].get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
-    # Binance NEAR
     try:
         async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=500", timeout=5) as resp:
             res = await resp.json()
@@ -305,7 +296,6 @@ async def fetch_multi_exchange_liquidity(session):
             for b in res.get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
     except Exception: pass
 
-    # Bybit NEAR
     try:
         async with session.get("https://api.bybit.com/v5/market/orderbook?category=linear&symbol=NEARUSDT&limit=200", timeout=5) as resp:
             res = await resp.json()
@@ -321,7 +311,7 @@ async def fetch_multi_exchange_liquidity(session):
     return liquidity_data
 
 
-# --- 4. ANALIZA AI (PROSTY JĘZYK, AKAPITY, BRAK ŻARGONU) ---
+# --- 4. ANALIZA AI ---
 async def generate_ai_report(btc_data, near_data, liquidity_data):
     if not GEMINI_API_KEY:
         raise RuntimeError("Brak klucza API Gemini.")
@@ -343,12 +333,12 @@ PŁYNNOŚĆ I STREFY RYNKU (WIELOGIEŁDOWE):
 
 Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
 1. "html_content": pełny kod HTML raportu dla strony internetowej https://piwecki.pl/analiza/ (ciemny motyw, czytelna struktura).
-2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, relacja BTC i NEAR, korelacja). Pisz krótkimi, czytelnymi akapitami opisowymi. Unikaj suchego żargonu technicznego – tłumacz sytuację przystępnym językiem (jak dla inwestora szukającego jasnych wniosków).
-3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa). Opisz w prostych akapitach, czy warto szukać pozycji długich (Long) czy krótkich (Short), podając czytelne strefy wejścia, poziom obrony (Stop Loss), cel (Take Profit) oraz bezpieczną wielkość pozycji.
+2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, relacja BTC i NEAR, korelacja). Pisz krótkimi, czytelnymi akapitami opisowymi. Unikaj suchego żargonu technicznego – tłumacz sytuację przystępnym językiem.
+3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa). Opisz w prostych akapitach pozycję, strefy wejścia, poziom obrony (Stop Loss), cel (Take Profit) oraz bezpieczną wielkość pozycji.
 
 BEZWZGLĘDNE ZASADY:
 - Zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
-- Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień, bez przytłaczania surowymi rzędami cyfr wskaźników.
+- Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
 """
 
     max_retries = 3
@@ -425,7 +415,7 @@ def send_telegram_message(text):
         print(f"Błąd wysyłki Telegram: {e}")
 
 
-# --- 6. GŁÓWNA FUNKCJA (Z ODPRONŚCIĄ NA BŁĘDY AI) ---
+# --- 6. GŁÓWNA FUNKCJA Z ZABEZPIECZENIEM AWARYJNYM FTP ---
 async def main():
     print("Start cyklu analitycznego BTC & NEAR...")
     async with aiohttp.ClientSession() as session:
@@ -437,11 +427,9 @@ async def main():
             
         liquidity_data = await fetch_multi_exchange_liquidity(session)
         
-        # Próba uzyskania raportu z AI
         report_data = await generate_ai_report(btc_data, near_data, liquidity_data)
         
         if report_data and report_data.get("html_content"):
-            # Pełny sukces - wysyłamy raport AI na FTP i Telegram
             upload_to_ftp(report_data["html_content"])
             
             if report_data.get("telegram_msg_btc"):
@@ -451,9 +439,7 @@ async def main():
             if report_data.get("telegram_msg_signals"):
                 send_telegram_message(report_data["telegram_msg_signals"])
         else:
-            print("Ostrzeżenie: Model AI nie zwrócił odpowiedzi (chwilowy problem z API). Wysyłam awaryjny raport na FTP...")
-            
-            # Awaryjny HTML, żeby strona na FTP ZAWSZE się zaktualizowała i nie wisiała
+            print("Ostrzeżenie: Model AI nie zwrócił odpowiedzi. Wysyłam awaryjny HTML na FTP...")
             fallback_html = f"""
             <!DOCTYPE html>
             <html lang="pl">
@@ -478,3 +464,6 @@ async def main():
             upload_to_ftp(fallback_html)
             
     print("Cykl analityczny zakończony.")
+
+if __name__ == "__main__":
+    asyncio.run(main())
