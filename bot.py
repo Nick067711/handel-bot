@@ -210,21 +210,22 @@ async def fetch_aggregated_market_data(session, symbol, bar):
     }
 
 
-# --- 3. PŁYNNOŚĆ I ORDERBOOKI ---
+# --- 3. PŁYNNOŚĆ I ORDERBOOKI (SZERSZE ZAKRESY) ---
 def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
-    bin_size = 500.0 if is_btc else 0.05
+    # Zwiększone zakresy (bin_size) dla rzetelnego obrazu day tradingu (1h/4h/1d)
+    bin_size = 1000.0 if is_btc else 0.20
     token_name = "BTC" if is_btc else "NEAR"
     asks_bins, bids_bins = {}, {}
     
     for w in walls:
         p = w["price"]
         s = w["size"]
-        if w["type"] == "Ask" and current_price <= p <= current_price * 1.10:
+        if w["type"] == "Ask" and current_price <= p <= current_price * 1.15:
             b_key = int(p / bin_size) * bin_size
             asks_bins.setdefault(b_key, {"token": 0.0, "usd": 0.0})
             asks_bins[b_key]["token"] += s
             asks_bins[b_key]["usd"] += s * p
-        elif w["type"] == "Bid" and current_price * 0.90 <= p <= current_price:
+        elif w["type"] == "Bid" and current_price * 0.85 <= p <= current_price:
             b_key = int(p / bin_size) * bin_size
             bids_bins.setdefault(b_key, {"token": 0.0, "usd": 0.0})
             bids_bins[b_key]["token"] += s
@@ -235,7 +236,7 @@ def aggregate_baskets_to_zones(walls, current_price, is_btc=True):
         k = max(asks_bins, key=lambda x: asks_bins[x]["token"])
         best_ask = f"${k:,.2f} - ${k+bin_size:,.2f} | {asks_bins[k]['token']:,.2f} {token_name}"
     if bids_bins:
-        k = max(bids_bins, key=lambda x: bids_bins[x]["token"])
+        k = max(bids_bins, key=lambda x: asks_bins[x]["token"])
         best_bid = f"${k:,.2f} - ${k+bin_size:,.2f} | {bids_bins[k]['token']:,.2f} {token_name}"
     return best_ask, best_bid
 
@@ -243,7 +244,7 @@ async def fetch_multi_exchange_liquidity(session):
     liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak"}
     btc_walls = []
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=200", timeout=5) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=400", timeout=5) as resp:
             res = await resp.json()
             if res.get("data"):
                 for a in res["data"][0].get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
@@ -251,7 +252,7 @@ async def fetch_multi_exchange_liquidity(session):
     except Exception: pass
 
     try:
-        async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=200", timeout=5) as resp:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=500", timeout=5) as resp:
             res = await resp.json()
             for a in res.get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
             for b in res.get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
@@ -259,11 +260,11 @@ async def fetch_multi_exchange_liquidity(session):
 
     if btc_walls:
         ask_z, bid_z = aggregate_baskets_to_zones(btc_walls, 80000.0, is_btc=True)
-        liquidity_data["btc_liquidation_map"] = f"Ask: {ask_z} | Bid: {bid_z}"
+        liquidity_data["btc_liquidation_map"] = f"Opór (Ask): {ask_z} | Wsparcie (Bid): {bid_z}"
 
     near_walls = []
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=200", timeout=5) as resp:
+        async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=400", timeout=5) as resp:
             res = await resp.json()
             if res.get("data"):
                 for a in res["data"][0].get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
@@ -271,7 +272,7 @@ async def fetch_multi_exchange_liquidity(session):
     except Exception: pass
 
     try:
-        async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=200", timeout=5) as resp:
+        async with session.get("https://api.binance.com/api/v3/depth?symbol=NEARUSDT&limit=500", timeout=5) as resp:
             res = await resp.json()
             for a in res.get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
             for b in res.get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
@@ -279,12 +280,12 @@ async def fetch_multi_exchange_liquidity(session):
 
     if near_walls:
         ask_zn, bid_zn = aggregate_baskets_to_zones(near_walls, 4.5, is_btc=False)
-        liquidity_data["near_liquidation_map"] = f"Ask: {ask_zn} | Bid: {bid_zn}"
+        liquidity_data["near_liquidation_map"] = f"Opór (Ask): {ask_zn} | Wsparcie (Bid): {bid_zn}"
 
     return liquidity_data
 
 
-# --- 4. ANALIZA AI ---
+# --- 4. ANALIZA AI (PROSTY JĘZYK, AKAPITY, BRAK ŻARGONU) ---
 async def generate_ai_report(btc_data, near_data, liquidity_data):
     if not GEMINI_API_KEY:
         raise RuntimeError("Brak klucza API Gemini.")
@@ -292,25 +293,26 @@ async def generate_ai_report(btc_data, near_data, liquidity_data):
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
-Jesteś zaawansowanym systemem analitycznym Market Maker Monitor skupionym na korelacji BTC oraz NEAR.
-Przeanalizuj poniższe dane rynkowe:
+Jesteś profesjonalnym doradcą day tradingu skupionym na korelacji Bitcoina (BTC) i NEAR.
+Przeanalizuj poniższe dane rynkowe z interwałów 1h, 4h oraz 1d:
 
-BTC WIELOINTERWAŁOWE DANE (1h, 4h, 1d):
+BTC DANE:
 {json.dumps(btc_data, indent=2)}
 
-NEAR WIELOINTERWAŁOWE DANE (1h, 4h, 1d):
+NEAR DANE:
 {json.dumps(near_data, indent=2)}
 
-PŁYNNOŚĆ I ORDERBOOKI ZE WSZYSTKICH GIEŁD:
+PŁYNNOŚĆ I STREFY RYNKU:
 {json.dumps(liquidity_data, indent=2)}
 
 Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
 1. "html_content": pełny kod HTML raportu dla strony internetowej https://piwecki.pl/analiza/ (ciemny motyw, czytelna struktura).
-2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, BTC & NEAR, korelacja, wskaźniki i strefy płynności).
-3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Top Okazje Day Trading / Sygnał dla BTC lub NEAR ze strefą wejścia, Stop Loss, Take Profit oraz bezpiecznymi widełkami pozycji).
+2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, relacja BTC i NEAR, korelacja). Pisz krótkimi, czytelnymi akapitami opisowymi. Unikaj suchego żargonu technicznego – tłumacz sytuację przystępnym językiem (jak dla inwestora szukającego jasnych wniosków).
+3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa). Opisz w prostych akapitach, czy warto szukać pozycji długich (Long) czy krótkich (Short), podając czytelne strefy wejścia, poziom obrony (Stop Loss), cel (Take Profit) oraz bezpieczną wielkość pozycji.
 
 BEZWZGLĘDNE ZASADY:
-- Zakaz stosowania formatowania LaTeX (zakaz używania ukośników wstecznych przy liczbach typu `\\,`). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
+- Zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych typu `\\,`). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
+- Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień, bez przytłaczania surowymi rzędami cyfr wskaźników.
 """
 
     max_retries = 3
@@ -333,44 +335,38 @@ BEZWZGLĘDNE ZASADY:
                 return None
 
 
-# --- 5. FTP (Zwykłe FTP bez TLS + pełne logowanie) & TELEGRAM ---
+# --- 5. FTP & TELEGRAM (Z POPRAWIONYM PARSE_MODE) ---
 def upload_to_ftp(html_content):
     if not all([FTP_HOST, FTP_USER, FTP_PASS]):
-        print("Błąd: Brak pełnej konfiguracji zmiennych środowiskowych FTP (HOST, USER, PASS).")
+        print("Błąd: Brak pełnej konfiguracji zmiennych środowiskowych FTP.")
         return False
         
     try:
-        print(f"Łączenie z serwerem FTP: {FTP_HOST} (zwykłe FTP)...")
+        print(f"Łączenie z serwerem FTP: {FTP_HOST}...")
         with ftplib.FTP(FTP_HOST, timeout=15) as ftp:
-            print("Połączono z serwerem. Logowanie...")
             ftp.login(FTP_USER, FTP_PASS)
-            print("Zalogowano pomyślnie.")
             
             dirs = FTP_DIR.split("/")
             for d in dirs:
                 if d:
                     try:
                         ftp.cwd(d)
-                        print(f"Przejściu do katalogu: {d}")
                     except ftplib.error_perm:
-                        print(f"Katalog {d} nie istnieje. Próbuję utworzyć...")
                         ftp.mkd(d)
                         ftp.cwd(d)
-                        print(f"Utworzono i weszto do: {d}")
                         
             temp_filename = "index.html"
             with open(temp_filename, "w", encoding="utf-8") as f:
                 f.write(html_content)
                 
-            print("Wysyłanie pliku index.html na serwer...")
             with open(temp_filename, "rb") as f:
-                ftp.storbinary(f"STOR index.html", f)
+                ftp.storbinary("STOR index.html", f)
                 
             os.remove(temp_filename)
-            print("Sukces! Raport HTML pomyślnie zaktualizowany na serwerze: https://piwecki.pl/analiza/")
+            print("Sukces! Raport HTML zaktualizowany na serwerze: https://piwecki.pl/analiza/")
             return True
     except Exception as e:
-        print(f"Szczegółowy błąd FTP: {e}")
+        print(f"Błąd FTP: {e}")
         return False
 
 def send_telegram_message(text):
@@ -379,7 +375,8 @@ def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": text
+        "text": text,
+        "parse_mode": "HTML"  # Poprawione formatowanie (wcześniejsza literówka wyeliminowana)
     }
     data = urllib.parse.urlencode(payload).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST")
