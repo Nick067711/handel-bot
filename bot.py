@@ -3,6 +3,8 @@ import json
 import ftplib
 import asyncio
 import aiohttp
+import urllib.request
+import urllib.parse
 import numpy as np
 from datetime import datetime, timezone
 from google import genai
@@ -691,6 +693,7 @@ BEZWZGLĘDNE ZASADY:
             else:
                 print("Wszystkie próby połączenia z modelem AI zakończyły się niepowodzeniem.")
                 return None
+
 
 # --- 6. FTP UPLOAD & TELEGRAM SENDER ---
 def upload_to_ftp(html_content):
