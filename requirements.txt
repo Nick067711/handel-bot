@@ -1,3 +1,4 @@
 aiohttp
 numpy
-google-genai
+anthropic
+openai
