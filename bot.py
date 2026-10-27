@@ -24,15 +24,13 @@ STATE_FILE = "sonic_signal_state.json"
 
 # --- PEŁNA MACIERZ POZIOMÓW HISTORYCZNYCH I STRUKTURY Z PLIKÓW CSV ---
 HISTORICAL_STRUCTURE_MATRIX = {
-    "LL_historical_covid": 0.0017,         # Absolutny dołek historyczny (13.03.2020)
-    "HL_base_accumulation": 0.0450,        # Dolna granica obecnej strefy konsolidacji/bazy
-    "HL_support_recent": 0.0540,           # Górna granica obecnego pasma bazy
-    "HL_key_support_1": 0.2622,            # Istotny wyższy dołek strukturalny (HL)
-    "HL_key_support_2": 0.3952,            # Pośredni poziom wsparcia / Fibo
-    "Virtual_Short_Anchor": 0.0700,        # Wirtualny Short Anchor (szczyt ze świecy)
-    "LH_resistance_2024_march": 1.2289,    # Szczyt z marca 2024 r.
-    "HH_resistance_2024_december": 1.4782, # Szczyt z grudnia 2024 r.
-    "ATH_historical": 3.4842               # Maksimum makro hossy (28.10.2021)
+    "LL_historical_standard": {"price": 0.0090, "date": "2019-11-25", "desc": "Najniższy poziom historyczny (z pominięciem anomalii COVID)"},
+    "HL_base_accumulation": {"price": 0.0450, "date": "Bieżąca baza", "desc": "Dolna granica obecnej strefy konsolidacji"},
+    "HL_support_recent": {"price": 0.0540, "date": "Bieżąca baza", "desc": "Górna granica pasma bazy"},
+    "Virtual_Short_Anchor": {"price": 0.0700, "date": "Wrzesień/Październik 2026", "desc": "Wirtualny Short Anchor (szczyt lokalny)"},
+    "LH_resistance_2024_march": {"price": 1.2289, "date": "2024-03-22", "desc": "Kluczowy opor / szczyt z marca 2024"},
+    "HH_resistance_2024_december": {"price": 1.4782, "date": "2024-12-16", "desc": "Szczyt impulsowy z grudnia 2024"},
+    "ATH_historical": {"price": 3.4842, "date": "2021-10-28", "desc": "Maksimum makro hossy"}
 }
 
 
@@ -84,7 +82,7 @@ class TradeEngine:
         }
 
 
-# --- 2. POBIERANIE DANYCH SONIC (Z GIEŁDY LUB PLIKU CSV) ---
+# --- 2. POBIERANIE DANYCH SONIC ---
 async def fetch_and_analyze_sonic(session):
     url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -117,11 +115,7 @@ async def fetch_and_analyze_sonic(session):
     current_close = closes[-1] if closes else 0.0478
     current_vol = volumes[-1] if volumes else 1500000.0
     
-    atl = HISTORICAL_STRUCTURE_MATRIX["LL_historical_covid"]
-    short_anchor = HISTORICAL_STRUCTURE_MATRIX["Virtual_Short_Anchor"]
-    
-    pct_to_low = round(((current_close - atl) / atl) * 100, 2)
-    diff_to_low_usdc = round(current_close - atl, 4)
+    short_anchor = HISTORICAL_STRUCTURE_MATRIX["Virtual_Short_Anchor"]["price"]
     pct_to_short_anchor = round(((short_anchor - current_close) / short_anchor) * 100, 2)
     diff_to_short_anchor_usdc = round(short_anchor - current_close, 4)
 
@@ -130,11 +124,8 @@ async def fetch_and_analyze_sonic(session):
         "volume": current_vol,
         "rsi": TradeEngine.calculate_rsi(closes),
         "macd": TradeEngine.calculate_macd(closes),
-        "pct_to_low": pct_to_low,
-        "diff_to_low_usdc": diff_to_low_usdc,
         "pct_to_short_anchor": pct_to_short_anchor,
         "diff_to_short_anchor_usdc": diff_to_short_anchor_usdc,
-        "recent_closes_14d": closes[-14:] if closes else [],
         "structural_matrix": HISTORICAL_STRUCTURE_MATRIX
     }
 
@@ -224,41 +215,41 @@ def generate_reports_and_decide(sonic_metrics, btc_metrics, target_signal):
         macro_status = "DNO BESSY"
 
     prompt = f"""
-Jesteś najwyższej klasy analitykiem rynkowym i podejmiesz autonomiczną decyzję inwestycyjną.
-Przeanalizuj poniższe dane techniczne i makro. Twoim zadaniem jest zdecydować, czy w tym momencie należy wygenerować sygnał BUY (LONG) dla Sonica, rozpoczynając cykl od wirtualnego SHORT z poziomu $0.070.
+Jesteś najwyższej klasy analitykiem rynkowym (Model: Groq GPT-OSS-120b). Przeanalizuj poniższe dane i podejmij decyzję inwestycyjną.
+Strategia: Start od wirtualnego SHORT z poziomu $0.070. Szukamy zwrotu na LONG w strefie bazy.
 
-Brak sztywnych progów cenowych! Przeanalizuj głęboko:
-1. Całą historię poziomów strukturalnych (LL $0.0017, baza $0.045-$0.054, szczyty 2024 r. $1.2289 i $1.4782, ATH $3.4842).
-2. Fale Eliotta i zniesienia Fibonacciego w relacji do wirtualnego shorta $0.070 i obecnej ceny.
-3. Odczyty RSI i MACD (wyczyszczenie z szumu rynkowego, poszukiwanie dywergencji i wyprzedania).
-4. Wielogiełdowy kontekst BTC.
+ZASADY RAPORTU HTML:
+1. Marginesy i układ: Strona musi mieć szerokie marginesy boczne (np. max-width: 1000px, margin: 40px auto) oraz duży odstęp/oddech od góry. Czysty, nowoczesny Dark Theme, bardzo czytelna typografia.
+2. Kierunek analizy: Znajdujemy się w fazie korygowania spadkowego od Shorta $0.070 w stronę bazy. Wszelkie wskaźniki postępu i cele mają pokazywać dążenie ceny w dół do bazy wsparcia (np. $0.045 - $0.054), a NIE w górę do odległych oporów.
+3. Poziomy strukturalne: Wymień absolutny najniższy i najwyższy poziom historyczny (z datami, pomijając anomalię COVID) oraz najbliższe poziomy historyczne względem obecnej ceny.
+4. Wolumen i waluta: Przy wolumenach wyraźnie zaznacz giełdę (np. Coinbase / wielogiełdowy agregat) oraz dopisz, że wartości są w USD (dolarach amerykańskich).
+5. Podpis: Na samym dole strony umieść wyraźny podpis: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
 
 DANE WEJŚCIOWE:
-- BTC (Binance/OKX/Bybit): Cena ${btc_metrics.get('close')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Status: {macro_status}.
-- SONIC (Coinbase/CSV): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI(14) {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}.
-- Odległość od Wirtualnego Shorta $0.070: -{sonic_metrics.get('pct_to_short_anchor')}% (-{sonic_metrics.get('diff_to_short_anchor_usdc')} USDC).
-- Macierz historyczna: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
+- BTC: ${btc_metrics.get('close')} USD, RSI {btc_rsi}, MACD Hist {btc_hist}, Status: {macro_status}.
+- SONIC: ${sonic_metrics.get('close')} USD, Wolumen: {sonic_metrics.get('volume')} (Coinbase, w USD), RSI {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}.
+- Odległość od Shorta $0.070: -{sonic_metrics.get('pct_to_short_anchor')}% (-{sonic_metrics.get('diff_to_short_anchor_usdc')} USD).
+- Macierz poziomów: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
 
-ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON Z KLUCZAMI (WSZYSTKIE TEKSTY MUSZĄ BYĆ W CAŁOŚCI W JĘZYKU POLSKIM):
-- "is_signal_trigger": (true / false) — Czy w oparciu o pełną analizę fal, Fibo i dywergencji wyznaczasz potężny, potwierdzony sygnał BUY (LONG)?
-- "telegram_msg_main": (Tylko jeśli is_signal_trigger == true, inaczej null). Kompletny, precyzyjny alert na Telegram PO POLSKU.
-- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY lub DNO BESSY, inaczej null). Alert makro PO POLSKU.
-- "html_content": Kompletny, profesjonalny kod Dashboardu HTML w Dark Theme W CAŁOŚCI PO POLSKU. Jeśli is_signal_trigger == true, dodaj widoczny baner sygnałowy. Jeśli false, przedstaw szczegółową analizę z procentowym dążeniem do celu i szacowanym czasem do zwrotu.
+ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON (W CAŁOŚCI PO POLSKU):
+- "is_signal_trigger": (true / false)
+- "telegram_msg_main": (Tylko jeśli is_signal_trigger==true, inaczej null) PO POLSKU.
+- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY / DNO BESSY, inaczej null) PO POLSKU.
+- "html_content": Kompletny kod HTML spełniający powyższe kryteria wizualne i merytoryczne (W CAŁOŚCI PO POLSKU).
 """
 
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś analitykiem rynkowym generującym precyzyjny kod HTML oraz oceny wyłącznie w języku polskim."},
+                {"role": "system", "content": "Jesteś ekspertem rynkowym generującym profesjonalny HTML i analizy wyłącznie po polsku."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
             temperature=0.2
         )
         data = json.loads(response.choices[0].message.content)
-        is_trigger = data.get("is_signal_trigger", False)
-        return is_trigger, data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
+        return data.get("is_signal_trigger", False), data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
     except Exception as e:
         print(f"Błąd zapytania do AI: {e}")
         return False, None, None, None
@@ -319,11 +310,10 @@ def send_telegram_message(text):
 
 # --- 7. GŁÓWNA PĘTLA ---
 async def main():
-    print("Start inteligentnego monitora (Model AI podejmuje decyzję o sygnale w oparciu o pełne dane historyczne)...")
+    print("Start monitora (Poprawiona estetyka HTML, poprawny kierunek celów w dół do bazy, podpis AI)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    
     should_generate_html = (state.get("last_html_date") != today_str)
     
     async with aiohttp.ClientSession() as session:
@@ -344,18 +334,18 @@ async def main():
             send_telegram_message(main_msg)
             state["last_type"] = "LONG"
             state["target_signal"] = "SHORT"
-            print("Sztuczna inteligencja wyznaczyła zweryfikowany sygnał LONG! Alert wysłano na Telegram.")
+            print("Sygnał LONG wygenerowany przez AI! Wysłano na Telegram.")
         else:
-            print("AI uznała brak wystarczającego potwierdzenia (konsolidacja/szum) – Telegram milczy, zaktualizowano analizę w pliku HTML.")
+            print("Brak sygnału (oczekiwanie w strefie bazy od shorta $0.070) – zaktualizowano czytelny raport HTML.")
             
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
             send_telegram_message(macro_msg)
-            print("Wysłano alert Makro BTC na Telegram.")
+            print("Wysłano alert Makro BTC.")
             
         save_state(state)
 
-    print("Zakończono cykl monitora.")
+    print("Cykl zakończony.")
 
 if __name__ == "__main__":
     asyncio.run(main())
