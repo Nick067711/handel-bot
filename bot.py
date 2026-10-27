@@ -78,10 +78,9 @@ class TradeEngine:
         current_price = closes[-1]
         recent_low = min(lows[-14:]) if lows else current_price
         
-        # Sprawdzamy czy zbliżamy się do stref bazy / istotnych wsparć i czy RSI daje oznaki wyprzedania lub dywergencji
         rsi = TradeEngine.calculate_rsi(closes)
         is_oversold = rsi <= 35
-        is_near_base = current_price <= 0.060  # W okolicach obecnej bazy strukturalnej
+        is_near_base = current_price <= 0.060
         
         return (is_oversold or is_near_base), f"Cena: {current_price}, RSI: {rsi}, Dołek 14 świec: {recent_low}"
 
@@ -216,7 +215,7 @@ async def fetch_multi_exchange_btc(session):
     }
 
 
-# --- 4. ZARZĄDZANIE STANEM (Inicjalizacja na SHORT $0.70, oczekiwanie na LONG) ---
+# --- 4. ZARZĄDZANIE STANEM ---
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -224,7 +223,6 @@ def load_state():
                 return json.load(f)
         except Exception:
             pass
-    # Domyślny stan początkowy zgodnie z wytycznymi: ostatni szczyt $0.70 to SELL (SHORT), teraz czekamy na BUY (LONG)
     return {"last_type": "SHORT", "last_short_price": 0.70, "target_signal": "LONG", "last_html_date": ""}
 
 def save_state(state):
@@ -236,7 +234,7 @@ def save_state(state):
 
 
 # --- 5. GENERATOR PROFESJONALNEGO RAPORTU HTML I AI ---
-def generate_reports(sonic_metrics, btc_metrics, target_signal, is_signal_ready):
+def generate_reports(sonic_metrics, btc_metrics, target_signal, is_ready_long):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
         return None, None, None
@@ -256,6 +254,7 @@ def generate_reports(sonic_metrics, btc_metrics, target_signal, is_signal_ready)
         macro_status = "DNO BESSY"
 
     current_date_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    readiness_text = "Gotowy do wejścia (Spełnione kryteria dołka/wyprzedania)" if is_ready_long else "W trakcie oczekiwania / konsolidacja w bazie"
 
     prompt = f"""
 Jesteś wybitnym analitykiem technicznym i makroekonomicznym. 
@@ -265,7 +264,7 @@ DANE WEJŚCIOWE:
 BTC (Wielogiełdowe): Cena ${btc_metrics.get('close')}, Wolumen {btc_metrics.get('volume')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Realized Price Proxy ${btc_metrics.get('realized_price_proxy')}, Status Cyklu AN-1: {macro_status}.
 SONIC (Coinbase): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}, Dołek hist. ${sonic_metrics.get('atl')} (+{sonic_metrics.get('pct_to_low')}% / {sonic_metrics.get('diff_to_low_usdc')} USDC), Szczyt hist. ${sonic_metrics.get('ath')} (-{sonic_metrics.get('pct_to_high')}% / {sonic_metrics.get('diff_to_high_usdc')} USDC).
 Poziomy strukturalne: Wirtualny Short Anchor: $0.70 | LH $0.8665, $1.4313 | HL $0.2622, $0.3952 | LL $0.054 base.
-Ocena gotowości na LONG z silnika bota: {"Gotowy do wejścia (Spełnione kryteria dołka/wyprzedania)" if is_ready_long else "W trakcie oczekiwania / konsolidacja w bazie"}.
+Ocena gotowości na LONG z silnika bota: {readiness_text}.
 
 ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON z 3 kluczami:
 - "telegram_msg_main": (Tylko jeśli is_ready_long==True, inaczej null). Pełny, szczegółowy alert dla laika na Telegram o wygenerowanym sygnale BUY (LONG) odzwierciedlającym przejście z poziomu Short $0.70.
@@ -368,16 +367,14 @@ async def main():
             sonic_metrics, btc_metrics, target_signal, is_ready_long
         )
         
-        # HTML generuje się raz dziennie i prezentuje pełny raport makro/techniczny
         if should_generate_html and html_content:
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        # Telegram wysyła komunikat o wejściu w LONG tylko w momencie pełnej gotowości rynkowej (dołek, RSI, dywergencje)
         if is_ready_long and main_msg:
             send_telegram_message(main_msg)
             state["last_type"] = "LONG"
-            state["target_signal"] = "SHORT" # Następny w kolejności po LONG będzie SHORT
+            state["target_signal"] = "SHORT"
             print("Wykryto sygnał wejścia w LONG! Wysłano powiadomienie na Telegram.")
         else:
             print("Brak warunków na BUY/LONG (oczekiwanie na sygnał ze strefy bazy/dywergencji od poziomu $0.70 shorta) – Telegram milczy.")
