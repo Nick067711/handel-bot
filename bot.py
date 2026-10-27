@@ -22,20 +22,21 @@ FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
 STATE_FILE = "sonic_signal_state.json"
 
-# --- KOMPLEKSOWA MACIERZ POZIOMÓW STRUKTURALNYCH ---
+# --- PEŁNA MACIERZ POZIOMÓW HISTORYCZNYCH I STRUKTURY Z PLIKÓW CSV ---
 HISTORICAL_STRUCTURE_MATRIX = {
-    "LL_historical_covid": 0.0017,       # Absolutny dołek historyczny
-    "HL_base_accumulation": 0.0450,      # Kluczowe wsparcie bazy / dolna granica
-    "HL_support_recent": 0.0540,         # Strefa oporu/wsparcia przejściowego
-    "HL_key_support_1": 0.2622,          # Wyższy dołek strukturalny (HL)
-    "Virtual_Short_Anchor": 0.0700,      # Wirtualny punkt odniesienia Short
-    "LH_resistance_2024_march": 1.2289,  # Szczyt z marca 2024 r.
+    "LL_historical_covid": 0.0017,         # Absolutny dołek historyczny (13.03.2020)
+    "HL_base_accumulation": 0.0450,        # Dolna granica obecnej strefy konsolidacji/bazy
+    "HL_support_recent": 0.0540,           # Górna granica obecnego pasma bazy
+    "HL_key_support_1": 0.2622,            # Istotny wyższy dołek strukturalny (HL)
+    "HL_key_support_2": 0.3952,            # Pośredni poziom wsparcia / Fibo
+    "Virtual_Short_Anchor": 0.0700,        # Wirtualny Short Anchor (szczyt ze świecy)
+    "LH_resistance_2024_march": 1.2289,    # Szczyt z marca 2024 r.
     "HH_resistance_2024_december": 1.4782, # Szczyt z grudnia 2024 r.
-    "ATH_historical": 3.4842             # Historyczne maksimum makro
+    "ATH_historical": 3.4842               # Maksimum makro hossy (28.10.2021)
 }
 
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ ---
+# --- 1. SILNIK MATEMATYCZNO-WSKAŹNIKOWY ---
 class TradeEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -82,24 +83,8 @@ class TradeEngine:
             "hist": round(float(histogram[-1]), 5)
         }
 
-    @staticmethod
-    def evaluate_long_readiness(closes, lows):
-        """Rygorystyczny filtr: wyklucza fake-sygnały. Wymaga rzeczywistego testu strefy bazy (<= $0.045) lub ekstremalnego wyprzedania RSI (<= 35)."""
-        if len(closes) < 14:
-            return False, "Brak wystarczającej historii"
-        current_price = closes[-1]
-        recent_low = min(lows[-14:]) if lows else current_price
-        rsi = TradeEngine.calculate_rsi(closes)
-        
-        # Twarde kryteria eliminujące fałszywe sygnały w konsolidacji bocznej:
-        is_deep_support_test = recent_low <= 0.0450
-        is_oversold = rsi <= 35
-        
-        ready = is_deep_support_test and is_oversold
-        return ready, f"Cena: {current_price}, RSI: {rsi}, Ostatni dołek 14 świec: {recent_low} (Wymóg: Dołek <= 0.045 i RSI <= 35)"
 
-
-# --- 2. POBIERANIE I ANALIZA DANYCH SONIC ---
+# --- 2. POBIERANIE DANYCH SONIC (Z GIEŁDY LUB PLIKU CSV) ---
 async def fetch_and_analyze_sonic(session):
     url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -129,7 +114,7 @@ async def fetch_and_analyze_sonic(session):
         except Exception as e:
             print(f"Błąd odczytu pliku CSV Sonic: {e}")
 
-    current_close = closes[-1] if closes else 0.0464
+    current_close = closes[-1] if closes else 0.0478
     current_vol = volumes[-1] if volumes else 1500000.0
     
     atl = HISTORICAL_STRUCTURE_MATRIX["LL_historical_covid"]
@@ -140,8 +125,6 @@ async def fetch_and_analyze_sonic(session):
     pct_to_short_anchor = round(((short_anchor - current_close) / short_anchor) * 100, 2)
     diff_to_short_anchor_usdc = round(short_anchor - current_close, 4)
 
-    is_ready_long, reason = TradeEngine.evaluate_long_readiness(closes, lows)
-
     return {
         "close": current_close,
         "volume": current_vol,
@@ -151,13 +134,12 @@ async def fetch_and_analyze_sonic(session):
         "diff_to_low_usdc": diff_to_low_usdc,
         "pct_to_short_anchor": pct_to_short_anchor,
         "diff_to_short_anchor_usdc": diff_to_short_anchor_usdc,
-        "is_ready_long": is_ready_long,
-        "readiness_reason": reason,
+        "recent_closes_14d": closes[-14:] if closes else [],
         "structural_matrix": HISTORICAL_STRUCTURE_MATRIX
     }
 
 
-# --- 3. POBIERANIE DANYCH BTC (Wielogiełdowe) ---
+# --- 3. POBIERANIE DANYCH BTC (WIELOGIEŁDOWE) ---
 async def fetch_multi_exchange_btc(session):
     exchanges = [
         ("Binance", "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100"),
@@ -181,7 +163,7 @@ async def fetch_multi_exchange_btc(session):
             pass
             
     if not closes_pool:
-        closes_pool = [80000.0] * 30
+        closes_pool = [65000.0] * 30
         volumes_pool = [50000.0] * 30
         trades_pool = [1000000] * 30
 
@@ -221,11 +203,11 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 5. GENERATOR RAPORTU HTML I AI (WYŁĄCZNIE W JĘZYKU POLSKIM) ---
-def generate_reports(sonic_metrics, btc_metrics, target_signal, is_ready_long):
+# --- 5. CENTRUM DECYZYJNE AI (GROQ / GPT-OSS-120B) ---
+def generate_reports_and_decide(sonic_metrics, btc_metrics, target_signal):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
-        return None, None, None
+        return False, None, None, None
 
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
@@ -241,38 +223,45 @@ def generate_reports(sonic_metrics, btc_metrics, target_signal, is_ready_long):
     elif btc_rsi <= 32 and btc_hist > 0:
         macro_status = "DNO BESSY"
 
-    readiness_text = "Gotowy do wejścia (Spełnione rygorystyczne kryteria dołka bazy i wyprzedania)" if is_ready_long else "W trakcie oczekiwania / brak potwierdzonego sygnału zwrotnego (ochrona przed fake-sygnałem)"
-
     prompt = f"""
-Jesteś wybitnym analitykiem technicznym i makroekonomicznym. Przygotuj pełny raport rynkowy W CAŁOŚCI W JĘZYKU POLSKIM. 
-Strategia: Start od wirtualnego SHORT z poziomu $0.070. Oczekujemy na zweryfikowany sygnał BUY (LONG), odnosząc cenę do pełnej macierzy historycznej, fal Eliotta oraz wskaźników bez fałszywych alarmów.
+Jesteś najwyższej klasy analitykiem rynkowym i podejmiesz autonomiczną decyzję inwestycyjną.
+Przeanalizuj poniższe dane techniczne i makro. Twoim zadaniem jest zdecydować, czy w tym momencie należy wygenerować sygnał BUY (LONG) dla Sonica, rozpoczynając cykl od wirtualnego SHORT z poziomu $0.070.
+
+Brak sztywnych progów cenowych! Przeanalizuj głęboko:
+1. Całą historię poziomów strukturalnych (LL $0.0017, baza $0.045-$0.054, szczyty 2024 r. $1.2289 i $1.4782, ATH $3.4842).
+2. Fale Eliotta i zniesienia Fibonacciego w relacji do wirtualnego shorta $0.070 i obecnej ceny.
+3. Odczyty RSI i MACD (wyczyszczenie z szumu rynkowego, poszukiwanie dywergencji i wyprzedania).
+4. Wielogiełdowy kontekst BTC.
 
 DANE WEJŚCIOWE:
-BTC (Wielogiełdowe): Cena ${btc_metrics.get('close')}, Wolumen {btc_metrics.get('volume')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Realized Price Proxy ${btc_metrics.get('realized_price_proxy')}, Status Cyklu AN-1: {macro_status}.
-SONIC (Coinbase): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI {sonic_metrics.get('rsi')}, Odległość do shorta $0.070: -{sonic_metrics.get('pct_to_short_anchor')}% ({sonic_metrics.get('diff_to_short_anchor_usdc')} USDC).
-Ocena gotowości z silnika bota: {readiness_text} (Powód: {sonic_metrics.get('readiness_reason')}).
+- BTC (Binance/OKX/Bybit): Cena ${btc_metrics.get('close')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Status: {macro_status}.
+- SONIC (Coinbase/CSV): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI(14) {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}.
+- Odległość od Wirtualnego Shorta $0.070: -{sonic_metrics.get('pct_to_short_anchor')}% (-{sonic_metrics.get('diff_to_short_anchor_usdc')} USDC).
+- Macierz historyczna: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
 
-ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON z 3 kluczami (WSZYSTKIE TEKSTY MUSZĄ BYĆ PO POLSKU):
-- "telegram_msg_main": (Tylko jeśli is_ready_long==True, inaczej null). Rzetelny, czytelny alert dla Telegram o sygnale BUY (LONG) w języku polskim.
-- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY lub DNO BESSY, inaczej null). Komunikat makro po polsku.
-- "html_content": Kompletny, profesjonalny Dashboard w Dark Theme W CAŁOŚCI W JĘZYKU POLSKIM, zawierający analizę makro FED, kontekst BTC oraz dogłębną analizę Sonica. Jeśli is_ready_long==True, umieść czerwony baner sygnałowy na górze, a jeśli false, umieść informację o oczekiwaniu w trybie bezwzględnego filtrowania fałszywych sygnałów.
+ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON Z KLUCZAMI (WSZYSTKIE TEKSTY MUSZĄ BYĆ W CAŁOŚCI W JĘZYKU POLSKIM):
+- "is_signal_trigger": (true / false) — Czy w oparciu o pełną analizę fal, Fibo i dywergencji wyznaczasz potężny, potwierdzony sygnał BUY (LONG)?
+- "telegram_msg_main": (Tylko jeśli is_signal_trigger == true, inaczej null). Kompletny, precyzyjny alert na Telegram PO POLSKU.
+- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY lub DNO BESSY, inaczej null). Alert makro PO POLSKU.
+- "html_content": Kompletny, profesjonalny kod Dashboardu HTML w Dark Theme W CAŁOŚCI PO POLSKU. Jeśli is_signal_trigger == true, dodaj widoczny baner sygnałowy. Jeśli false, przedstaw szczegółową analizę z procentowym dążeniem do celu i szacowanym czasem do zwrotu.
 """
 
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś ekspertem rynkowym generującym profesjonalne strony HTML i powiadomienia WYŁĄCZNIE W JĘZYKU POLSKIM."},
+                {"role": "system", "content": "Jesteś analitykiem rynkowym generującym precyzyjny kod HTML oraz oceny wyłącznie w języku polskim."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
             temperature=0.2
         )
         data = json.loads(response.choices[0].message.content)
-        return data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
+        is_trigger = data.get("is_signal_trigger", False)
+        return is_trigger, data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
     except Exception as e:
         print(f"Błąd zapytania do AI: {e}")
-        return None, None, None
+        return False, None, None, None
 
 
 # --- 6. FTP & TELEGRAM ---
@@ -281,7 +270,7 @@ def upload_to_ftp(html_content):
         return False
         
     try:
-        print(f"Łączenie z serwerem FTP: {FTP_HOST}...")
+        print(f"Łączenie z FTP: {FTP_HOST}...")
         with ftplib.FTP(FTP_HOST, timeout=15) as ftp:
             ftp.login(FTP_USER, FTP_PASS)
             
@@ -302,7 +291,7 @@ def upload_to_ftp(html_content):
                 ftp.storbinary("STOR index.html", f)
                 
             os.remove(temp_filename)
-            print("Sukces! Raport HTML zaktualizowany na serwerze: https://piwecki.pl/analiza/")
+            print("Sukces! Raport HTML zaktualizowany: https://piwecki.pl/analiza/")
             return True
     except Exception as e:
         print(f"Błąd FTP: {e}")
@@ -328,9 +317,9 @@ def send_telegram_message(text):
         print(f"Błąd wysyłki Telegram: {e}")
 
 
-# --- 7. GŁÓWNA FUNKCJA ---
+# --- 7. GŁÓWNA PĘTLA ---
 async def main():
-    print("Start monitora z rygorystyczną filtrowacją fałszywych sygnałów (wszystko w jęz. polskim)...")
+    print("Start inteligentnego monitora (Model AI podejmuje decyzję o sygnale w oparciu o pełne dane historyczne)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -342,32 +331,31 @@ async def main():
         btc_metrics = await fetch_multi_exchange_btc(session)
         
         target_signal = state.get("target_signal", "LONG")
-        is_ready_long = sonic_metrics.get("is_ready_long", False)
         
-        main_msg, macro_msg, html_content = generate_reports(
-            sonic_metrics, btc_metrics, target_signal, is_ready_long
+        is_trigger, main_msg, macro_msg, html_content = generate_reports_and_decide(
+            sonic_metrics, btc_metrics, target_signal
         )
         
         if should_generate_html and html_content:
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        if is_ready_long and main_msg:
+        if is_trigger and main_msg:
             send_telegram_message(main_msg)
             state["last_type"] = "LONG"
             state["target_signal"] = "SHORT"
-            print("Wykryto zweryfikowany sygnał wejścia w LONG! Wysłano powiadomienie na Telegram.")
+            print("Sztuczna inteligencja wyznaczyła zweryfikowany sygnał LONG! Alert wysłano na Telegram.")
         else:
-            print("Brak zweryfikowanego sygnału BUY/LONG (odrzucono fałszywy alarm – oczekiwanie na faktyczny test wsparcia) – Telegram milczy.")
+            print("AI uznała brak wystarczającego potwierdzenia (konsolidacja/szum) – Telegram milczy, zaktualizowano analizę w pliku HTML.")
             
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
             send_telegram_message(macro_msg)
-            print("Wysłano rzadki alert Makro BTC na Telegram.")
+            print("Wysłano alert Makro BTC na Telegram.")
             
         save_state(state)
 
-    print("Cykl analityczny zakończony.")
+    print("Zakończono cykl monitora.")
 
 if __name__ == "__main__":
     asyncio.run(main())
