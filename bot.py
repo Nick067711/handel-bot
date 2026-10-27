@@ -3,10 +3,10 @@ import json
 import ftplib
 import asyncio
 import aiohttp
+import csv
 import urllib.request
 import urllib.parse
 import numpy as np
-import pandas as pd
 from datetime import datetime, timezone
 from openai import OpenAI
 
@@ -87,9 +87,8 @@ class TradeEngine:
         }
 
 
-# --- 2. POBIERANJE I ANALIZA DANYCH HISTORYCZNYCH SONICA Z PLIKÓW I COINBASE ---
+# --- 2. POBIERANIE I ANALIZA DANYCH HISTORYCZNYCH SONICA (Bez Pandas) ---
 async def fetch_and_analyze_sonic(session):
-    # Pobieranie świec z Coinbase (S-USD)
     url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
     closes, highs, lows, volumes = [], [], [], []
@@ -105,30 +104,34 @@ async def fetch_and_analyze_sonic(session):
     except Exception as e:
         print(f"Coinbase Fetch error (Sonic): {e}")
 
-    # Uzupełnienie lub wsparcie z lokalnych plików CSV (historia FTM/Sonic od 2019 r.)
     file_path = "SONIC_FTM_S_1d.csv"
     historical_stats = {}
     if os.path.exists(file_path):
         try:
-            df_csv = pd.read_csv(file_path)
-            csv_closes = df_csv['close'].values
-            csv_highs = df_csv['high'].values
-            csv_lows = df_csv['low'].values
+            csv_closes, csv_highs, csv_lows, csv_vols = [], [], [], []
+            with open(file_path, mode="r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    csv_closes.append(float(row["close"]))
+                    csv_highs.append(float(row["high"]))
+                    csv_lows.append(float(row["low"]))
+                    csv_vols.append(float(row["volume"]))
             
-            if not closes:
-                closes = list(csv_closes[-100:])
-                highs = list(csv_highs[-100:])
-                lows = list(csv_lows[-100:])
-                volumes = list(df_csv['volume'].values[-100:])
+            if not closes and csv_closes:
+                closes = csv_closes[-100:]
+                highs = csv_highs[-100:]
+                lows = csv_lows[-100:]
+                volumes = csv_vols[-100:]
             
-            historical_stats = {
-                "csv_all_time_high": float(csv_highs.max()),
-                "csv_all_time_low": float(csv_lows.min()),
-                "csv_recent_high_180d": float(csv_highs[-180:].max()) if len(csv_highs) >= 180 else float(csv_highs.max()),
-                "csv_recent_low_180d": float(csv_lows[-180:].min()) if len(csv_lows) >= 180 else float(csv_lows.min()),
-            }
+            if csv_highs and csv_lows:
+                historical_stats = {
+                    "csv_all_time_high": float(max(csv_highs)),
+                    "csv_all_time_low": float(min(csv_lows)),
+                    "csv_recent_high_180d": float(max(csv_highs[-180:])) if len(csv_highs) >= 180 else float(max(csv_highs)),
+                    "csv_recent_low_180d": float(min(csv_lows[-180:])) if len(csv_lows) >= 180 else float(min(csv_lows)),
+                }
         except Exception as e:
-            print(f"Błąd odczytu lokalnego pliku CSV Sonic: {e}")
+            print(f"Błąd odczytu pliku CSV Sonic: {e}")
 
     current_close = closes[-1] if closes else 0.0541
     current_vol = volumes[-1] if volumes else 1500000.0
@@ -339,7 +342,7 @@ def send_telegram_message(text):
 
 # --- 6. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start systemu analitycznego (Zintegrowane poziomy historyczne Sonica + Wielogiełdowe BTC)...")
+    print("Start systemu analitycznego (Bez zależności od Pandas, Wielogiełdowe BTC + Sonic CSV)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
