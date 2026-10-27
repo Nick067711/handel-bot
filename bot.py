@@ -87,7 +87,7 @@ class TradeEngine:
         }
 
 
-# --- 2. POBIERANIE I ANALIZA DANYCH HISTORYCZNYCH SONICA (Bez Pandas) ---
+# --- 2. POBIERANIE I ANALIZA DANYCH SONICA (CSV + Coinbase) ---
 async def fetch_and_analyze_sonic(session):
     url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -151,8 +151,6 @@ async def fetch_and_analyze_sonic(session):
         "macd": TradeEngine.calculate_macd(closes),
         "atl": atl,
         "ath": ath,
-        "recent_high_180d": historical_stats.get("csv_recent_high_180d", 0.0739),
-        "recent_low_180d": historical_stats.get("csv_recent_low_180d", 0.0190),
         "pct_to_low": pct_to_low,
         "diff_to_low_usdc": diff_to_low_usdc,
         "pct_to_high": pct_to_high,
@@ -167,6 +165,8 @@ async def fetch_and_analyze_sonic(session):
         }
     }
 
+
+# --- 3. POBIERANJE WIELOGIEŁDOWYCH DANYCH BTC ---
 async def fetch_multi_exchange_btc(session):
     exchanges = [
         ("Binance", "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100"),
@@ -212,7 +212,7 @@ async def fetch_multi_exchange_btc(session):
     }
 
 
-# --- 3. ZARZĄDZANIE STANEM ---
+# --- 4. ZARZĄDZANIE STANEM ---
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -230,8 +230,8 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 4. GENEROWANIE RAPORTÓW PRZEZ AI ---
-def generate_reports(sonic_metrics, btc_metrics, last_required_type, should_generate_html, active_alert_text):
+# --- 5. GENEROWANIE RAPORTÓW PRZEZ AI ---
+def generate_reports(sonic_metrics, btc_metrics, last_required_type, should_generate_html):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
         return None, None, None
@@ -250,24 +250,30 @@ def generate_reports(sonic_metrics, btc_metrics, last_required_type, should_gene
     elif btc_rsi <= 32 and btc_hist > 0:
         macro_status = "DNO BESSY"
 
+    current_date_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
     prompt = f"""
 Jesteś profesjonalnym analitykiem kryptowalutowym. Wykorzystaj pełną wiedzę z backtestu (fale Eliotta, zniesienia Fibonacciego, poziomy HH, HL, LH, LL, RSI, MACD, dywergencje, wolumen, transakcje, Realized Price) oraz dostarczone historyczne poziomy ceny dla Sonica (FTM/S). Przygotuj:
-1. Alert cenowy dla Sonica (S) z Coinbase z wymuszonym typem: {last_required_type} na Telegram.
-2. Alert makro dla BTC na Telegram (wyłącznie jeśli status cyklu to Szczyt Hossy lub Dno Bessy). Status: {macro_status}.
-3. {"Dla raportu dziennego HTML na stronie https://piwecki.pl/analiza/ wygeneruj pełną stronę HTML wyłącznie dla BTC oraz Sonic (S). Raport musi zawierać zagregowane dane techniczne BTC, szczegółowe dane Sonica wraz z twardymi poziomami historycznymi, odległością w % i USDC do szczytów/dołków, dogłębną analizę makro, newsy i sentyment oraz – jeśli w tym cyklu wygenerowano alert cenowy – WYRAŹNY, CZERWONY POGRUBIONY KOMUNIKAT ALERTU w górnej części strony." if should_generate_html else "HTML: zwróć null."}
 
-KOMUNIKAT ALERTU CENOWEGO: {active_alert_text}
+1. <b>telegram_msg_main</b>: Kompleksowy, czytelny dla laika, ale merytoryczny alert cenowy dla Sonica (S) na Telegram w formacie HTML, zawierający dokładnie w nowych wierszach:
+<b>Sonic - alert cenowy</b>
+<b>Aktualna cena:</b> ${sonic_metrics.get('close')}
+<b>Bieżąca data:</b> {current_date_utc}
+<b>Analiza wolumenu:</b> [szczegółowy opis wolumenu z giełd/Coinbase]
+<b>Położenie ceny względem kluczowych poziomów:</b> [odniesienie do poziomów LL, HL, LH, HH oraz odległości w % i USDC do dołka/szczytu]
+<b>Położenie wskaźników i dywergence:</b> [RSI, MACD, zniesienia Fibo]
+<b>Komentarz i nastroje inwestorów:</b> [podsumowanie sentymentu i newsów wokół projektu Sonic]
+<b>Sugerowana transakcja:</b> {last_required_type}
+<b>Poziom otwarcia / Zasięg / Horyzont czasowy:</b> [konkretne widełki cenowe i czasowe]
 
-AGREGOWANE DANE BTC (Wielogiełdowe):
-{json.dumps(btc_metrics, indent=2)}
+2. <b>telegram_msg_macro</b>: Niezależny alert makro BTC na Telegram (wysyłany TYLKO jeśli status to SZCZYT HOSSY lub DNO BESSY). Status obecny: {macro_status}.
 
-KOMPREHENSYWNE DANE I POZIOMY HISTORYCZNE SONIC (FTM / S):
-{json.dumps(sonic_metrics, indent=2)}
+3. {"<b>html_content</b>: Pełna strona HTML dla https://piwecki.pl/analiza/ zawierająca dane BTC i Sonica, dogłębną analizę makro, oraz w górnej części wyrazisty, pogrubiony komunikat w czerwonej czcionce z powiadomieniem o nowym sygnale cenowym <b>" + last_required_type + "</b> dla Sonica." if should_generate_html else "<b>html_content</b>: null"}
 
-Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z kluczami:
-- "telegram_msg_main": Alert cenowy dla Sonica (HTML Telegram).
-- "telegram_msg_macro": Alert makro BTC (HTML Telegram, lub null jeśli status neutralny).
-- "html_content": Kompletny kod strony HTML (lub null).
+DANE BTC: {json.dumps(btc_metrics, indent=2)}
+DANE SONIC: {json.dumps(sonic_metrics, indent=2)}
+
+Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z wyżej wymienionymi kluczami.
 """
 
     try:
@@ -287,7 +293,7 @@ Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z kluczami:
         return None, None, None
 
 
-# --- 5. FTP & TELEGRAM ---
+# --- 6. FTP & TELEGRAM ---
 def upload_to_ftp(html_content):
     if not all([FTP_HOST, FTP_USER, FTP_PASS]) or not html_content:
         return False
@@ -340,9 +346,9 @@ def send_telegram_message(text):
         print(f"Błąd wysyłki Telegram: {e}")
 
 
-# --- 6. GŁÓWNA FUNKCJA ---
+# --- 7. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start systemu analitycznego (Bez zależności od Pandas, Wielogiełdowe BTC + Sonic CSV)...")
+    print("Start systemu analitycznego (Pełne komunikaty analityczne na Telegram + HTML)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -356,10 +362,8 @@ async def main():
         last_type = state.get("last_type", "SHORT")
         next_type = "LONG" if last_type == "SHORT" else "SHORT"
         
-        active_alert_text = f"NOWY SYGNAŁ CENOWY: {next_type} dla Sonica (S)"
-        
         main_msg, macro_msg, html_content = generate_reports(
-            sonic_metrics, btc_metrics, next_type, should_generate_html, active_alert_text
+            sonic_metrics, btc_metrics, next_type, should_generate_html
         )
         
         if should_generate_html and html_content:
@@ -369,7 +373,7 @@ async def main():
         if main_msg:
             send_telegram_message(main_msg)
             state["last_type"] = next_type
-            print(f"Wysłano alert cenowy Sonica ({next_type}) na Telegram.")
+            print(f"Wysłano pełny alert cenowy Sonica ({next_type}) na Telegram.")
             
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
