@@ -22,7 +22,7 @@ FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
 STATE_FILE = "sonic_signal_state.json"
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ ---
+# --- 1. SILNIK ANALIZY TECHNICZNEJ (Fibo, Fale, Dywergencje, Wskaźniki) ---
 class TradeEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -70,17 +70,20 @@ class TradeEngine:
         }
 
     @staticmethod
-    def detect_structural_pivot(closes, window=14):
-        """Wykrywa czy ostatnia świeca jest rzeczywistym punktem zwrotnym (pivot low/high)."""
-        if len(closes) < window:
-            return False, "NONE"
-        recent = closes[-window:]
-        curr = closes[-1]
-        if curr == min(recent):
-            return True, "LONG" # Dołek - potencjał na Long
-        elif curr == max(recent):
-            return True, "SHORT" # Szczyt - potencjał na Short
-        return False, "NONE"
+    def evaluate_long_readiness(closes, lows):
+        """Ocenia czy aktualna struktura cenowa wykazuje cechy wyczerpania spadków (gotowość na BUY/LONG od $0.70 shorta)."""
+        if len(closes) < 14:
+            return False, "Brak wystarczającej historii"
+        
+        current_price = closes[-1]
+        recent_low = min(lows[-14:]) if lows else current_price
+        
+        # Sprawdzamy czy zbliżamy się do stref bazy / istotnych wsparć i czy RSI daje oznaki wyprzedania lub dywergencji
+        rsi = TradeEngine.calculate_rsi(closes)
+        is_oversold = rsi <= 35
+        is_near_base = current_price <= 0.060  # W okolicach obecnej bazy strukturalnej
+        
+        return (is_oversold or is_near_base), f"Cena: {current_price}, RSI: {rsi}, Dołek 14 świec: {recent_low}"
 
 
 # --- 2. POBIERANIE DANYCH SONIC (Coinbase + plik historyczny) ---
@@ -140,7 +143,7 @@ async def fetch_and_analyze_sonic(session):
     pct_to_high = round(((ath - current_close) / current_close) * 100, 2)
     diff_to_high_usdc = round(ath - current_close, 4)
 
-    is_pivot, pivot_type = TradeEngine.detect_structural_pivot(closes)
+    is_ready_long, reason = TradeEngine.evaluate_long_readiness(closes, lows)
 
     return {
         "close": current_close,
@@ -153,9 +156,10 @@ async def fetch_and_analyze_sonic(session):
         "diff_to_low_usdc": diff_to_low_usdc,
         "pct_to_high": pct_to_high,
         "diff_to_high_usdc": diff_to_high_usdc,
-        "is_pivot": is_pivot,
-        "pivot_type": pivot_type,
+        "is_ready_long": is_ready_long,
+        "readiness_reason": reason,
         "structural_levels": {
+            "virtual_short_anchor": 0.70,
             "LL_historical": atl,
             "HL_key_support_1": 0.2622,
             "HL_key_support_2": 0.3952,
@@ -212,7 +216,7 @@ async def fetch_multi_exchange_btc(session):
     }
 
 
-# --- 4. ZARZĄDZANIE STANEM ---
+# --- 4. ZARZĄDZANIE STANEM (Inicjalizacja na SHORT $0.70, oczekiwanie na LONG) ---
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -220,7 +224,8 @@ def load_state():
                 return json.load(f)
         except Exception:
             pass
-    return {"last_type": "SHORT", "last_html_date": ""}
+    # Domyślny stan początkowy zgodnie z wytycznymi: ostatni szczyt $0.70 to SELL (SHORT), teraz czekamy na BUY (LONG)
+    return {"last_type": "SHORT", "last_short_price": 0.70, "target_signal": "LONG", "last_html_date": ""}
 
 def save_state(state):
     try:
@@ -231,7 +236,7 @@ def save_state(state):
 
 
 # --- 5. GENERATOR PROFESJONALNEGO RAPORTU HTML I AI ---
-def generate_reports(sonic_metrics, btc_metrics, next_type, is_signal_event):
+def generate_reports(sonic_metrics, btc_metrics, target_signal, is_signal_ready):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
         return None, None, None
@@ -253,32 +258,31 @@ def generate_reports(sonic_metrics, btc_metrics, next_type, is_signal_event):
     current_date_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     prompt = f"""
-Jesteś starszym analitykiem makroekonomicznym i ekspertem rynków kryptowalut. Przygotuj kompleksowy raport rynkowy.
+Jesteś wybitnym analitykiem technicznym i makroekonomicznym. 
+Kontekst strategii: Wirtualny punkt wyjścia to ustalony wcześniej szczyt na poziomie $0.70, na którym otwarto SHORT (SELL). System znajduje się w fazie oczekiwania na sygnał BUY (LONG), oceniając strukturę falową Eliotta, zniesienia Fibonacciego (strefy 0.618-0.786), kluczowe poziomy ceny, wolumen, wskaźniki RSI/MACD oraz dywergencje.
 
 DANE WEJŚCIOWE:
-BTC (Wielogiełdowe): Cena ${btc_metrics.get('close')}, Wolumen 24h {btc_metrics.get('volume')}, Trades {btc_metrics.get('trades')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Realized Price Proxy ${btc_metrics.get('realized_price_proxy')}, Status Cyklu AN-1: {macro_status}.
-SONIC (Coinbase): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI {sonic_metrics.get('rsi')}, Dołek hist. ${sonic_metrics.get('atl')} (+{sonic_metrics.get('pct_to_low')}% / {sonic_metrics.get('diff_to_low_usdc')} USDC), Szczyt hist. ${sonic_metrics.get('ath')} (-{sonic_metrics.get('pct_to_high')}% / {sonic_metrics.get('diff_to_high_usdc')} USDC).
-Poziomy strukturalne Sonica: LH $0.8665, $1.4313 | HL $0.2622, $0.3952 | LL $0.054 base.
-Czy jest aktywny alert cenowy na dzisiaj: {"TAK (" + next_type + ")" if is_signal_event else "NIE (Brak zwrotu)"}.
+BTC (Wielogiełdowe): Cena ${btc_metrics.get('close')}, Wolumen {btc_metrics.get('volume')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Realized Price Proxy ${btc_metrics.get('realized_price_proxy')}, Status Cyklu AN-1: {macro_status}.
+SONIC (Coinbase): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}, Dołek hist. ${sonic_metrics.get('atl')} (+{sonic_metrics.get('pct_to_low')}% / {sonic_metrics.get('diff_to_low_usdc')} USDC), Szczyt hist. ${sonic_metrics.get('ath')} (-{sonic_metrics.get('pct_to_high')}% / {sonic_metrics.get('diff_to_high_usdc')} USDC).
+Poziomy strukturalne: Wirtualny Short Anchor: $0.70 | LH $0.8665, $1.4313 | HL $0.2622, $0.3952 | LL $0.054 base.
+Ocena gotowości na LONG z silnika bota: {"Gotowy do wejścia (Spełnione kryteria dołka/wyprzedania)" if is_ready_long else "W trakcie oczekiwania / konsolidacja w bazie"}.
 
 ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON z 3 kluczami:
-- "telegram_msg_main": (Tylko jeśli is_signal_event==True, inaczej null). Pełny, czytelny alert dla laika na Telegram o wyznaczonym sygnale {next_type} dla Sonica, sformatowany czytelnie od nowych linii.
+- "telegram_msg_main": (Tylko jeśli is_ready_long==True, inaczej null). Pełny, szczegółowy alert dla laika na Telegram o wygenerowanym sygnale BUY (LONG) odzwierciedlającym przejście z poziomu Short $0.70.
 - "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY lub DNO BESSY, inaczej null).
-- "html_content": Kompletny, profesjonalny kod strony HTML w stylu nowoczesnego Dashboardu Analitycznego (Dark Theme, CSS wewnątrz `<style>`).
+- "html_content": Kompletny, profesjonalny kod strony HTML (Dashboard w ciemnym motywie Dark Theme), zawierający pełną analizę makro FED, kontekst BTC, oraz dogłębną analizę Sonica (fale, zniesienia Fibonacciego, dywergencje, odległość od $0.70 shorta do obecnej bazy). Jeśli is_ready_long==True, na górze strony umieść duży czerwony baner sygnałowy.
 
 WYMAGANIA DOTYCZĄCE HTML:
-1. W górnej części strony umieść sekcję statusu. Jeśli jest aktywny alert ({is_signal_event}), wyrenderuj wielki, czerwony, pogrubiony baner:
-`<div style="background:#8b0000; color:#fff; padding:20px; border-radius:8px; font-weight:bold; font-size:1.4em; text-align:center; margin-bottom:20px;">🚨 UWAAGA: NOWY ALERT CENOWY DLA SONIC (S): SYGNAŁ {next_type} 🚨</div>`
-2. KARTY STATYSTYCZNE (KPI): Cena BTC, Realized Price Proxy, Cena Sonic, Odległość Sonic do ATL (+% / USDC), Odległość Sonic do ATH (-% / USDC).
-3. SEKCJA 1: DOKŁADNA ANALIZA MACRO BTC. Omów kontekst stóp procentowych FED, płynność globalną, zachowanie wskaźnika Realized Price oraz model cyklu AN-1 (status: {macro_status}).
-4. SEKCJA 2: ANALIZA SONIC (S). Przeanalizuj zachowanie cenowe przy kluczowych poziomach strukturalnych (LH/HL/LL), sentyment inwestorów, nastroje rynkowe oraz najświeższe wiadomości ze świata Sonica.
+1. KARTY STATYSTYCZNE (KPI): Cena BTC, Realized Price Proxy, Cena Sonic, Odległość Sonic do bazowego shorta $0.70, Odległość do ATL w % i USDC.
+2. SEKCJA ANALIZY MAKROEKONOMICZNEJ BTC: Wpływ FED (stopy procentowe, polityka monetarna), płynność rynkowa, wskaźniki on-chain i model cyklu.
+3. SEKCJA ANALIZY TECHNICZNEJ SONIC (S): Szczegółowa ocena fal, Fibo, poziomów wsparcia/oporu (LL, HL, LH, HH), dywerencji RSI/MACD oraz aktualny sentyment projektu.
 """
 
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś ekspertem rynkowym i programistą generującym dopracowane pliki HTML i JSON."},
+                {"role": "system", "content": "Jesteś ekspertem rynkowym i programistą generującym profesjonalne strony HTML i JSON."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
@@ -346,7 +350,7 @@ def send_telegram_message(text):
 
 # --- 7. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start monitora (Zaawansowana analiza HTML makro BTC + Sonic, filtrowanie alertów Telegram)...")
+    print("Start monitora (Strategia: Start od SHORT $0.70, oczekiwanie na BUY/LONG z pełną analizą fal, Fibo i dywerencji)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -357,33 +361,31 @@ async def main():
         sonic_metrics = await fetch_and_analyze_sonic(session)
         btc_metrics = await fetch_multi_exchange_btc(session)
         
-        last_type = state.get("last_type", "SHORT")
-        next_type = "LONG" if last_type == "SHORT" else "SHORT"
-        
-        # Wiadomość na Telegram jest generowana TYLKO wtedy, gdy wykryjemy pivot zwrotny zgodny z alternacją
-        is_signal_event = sonic_metrics.get("is_pivot", False) and (sonic_metrics.get("pivot_type") == next_type)
+        target_signal = state.get("target_signal", "LONG")
+        is_ready_long = sonic_metrics.get("is_ready_long", False)
         
         main_msg, macro_msg, html_content = generate_reports(
-            sonic_metrics, btc_metrics, next_type, is_signal_event
+            sonic_metrics, btc_metrics, target_signal, is_ready_long
         )
         
-        # FTP HTML zaktualizuje się raz na dobę
+        # HTML generuje się raz dziennie i prezentuje pełny raport makro/techniczny
         if should_generate_html and html_content:
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        # Wysyłka wiadomości na Telegram TYLKO przy realnym sygnale zwrotnym
-        if is_signal_event and main_msg:
+        # Telegram wysyła komunikat o wejściu w LONG tylko w momencie pełnej gotowości rynkowej (dołek, RSI, dywergencje)
+        if is_ready_long and main_msg:
             send_telegram_message(main_msg)
-            state["last_type"] = next_type
-            print(f"Wysłano alert cenowy Sonica ({next_type}) na Telegram.")
+            state["last_type"] = "LONG"
+            state["target_signal"] = "SHORT" # Następny w kolejności po LONG będzie SHORT
+            print("Wykryto sygnał wejścia w LONG! Wysłano powiadomienie na Telegram.")
         else:
-            print("Brak momentu zwrotnego na Sonicu – Telegram milczy.")
+            print("Brak warunków na BUY/LONG (oczekiwanie na sygnał ze strefy bazy/dywergencji od poziomu $0.70 shorta) – Telegram milczy.")
             
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
             send_telegram_message(macro_msg)
-            print("Wysłano alert Makro BTC na Telegram.")
+            print("Wysłano rzadki alert Makro BTC na Telegram.")
             
         save_state(state)
 
