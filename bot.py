@@ -6,6 +6,7 @@ import aiohttp
 import urllib.request
 import urllib.parse
 import numpy as np
+import pandas as pd
 from datetime import datetime, timezone
 from openai import OpenAI
 
@@ -21,7 +22,7 @@ FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
 STATE_FILE = "sonic_signal_state.json"
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ (AN-1 / Fibo / Dywergencje / Wskaźniki) ---
+# --- 1. SILNIK ANALIZY TECHNICZNEJ ---
 class TradeEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -86,10 +87,12 @@ class TradeEngine:
         }
 
 
-# --- 2. POBIERANIE SZCZEGÓŁOWYCH DANYCH RYNKOWYCH ---
-async def fetch_coinbase_sonic(session):
+# --- 2. POBIERANJE I ANALIZA DANYCH HISTORYCZNYCH SONICA Z PLIKÓW I COINBASE ---
+async def fetch_and_analyze_sonic(session):
+    # Pobieranie świec z Coinbase (S-USD)
     url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
+    closes, highs, lows, volumes = [], [], [], []
     try:
         async with session.get(url, headers=headers, timeout=8) as resp:
             if resp.status == 200:
@@ -99,119 +102,114 @@ async def fetch_coinbase_sonic(session):
                     volumes = [float(c[5]) for c in data[::-1]]
                     highs = [float(c[2]) for c in data[::-1]]
                     lows = [float(c[1]) for c in data[::-1]]
-                    current_close = closes[-1]
-                    
-                    all_time_low = min(lows) if lows else 0.0023
-                    all_time_high = max(highs) if highs else 3.3092
-                    
-                    pct_to_low = round(((current_close - all_time_low) / all_time_low) * 100, 2)
-                    diff_to_low_usdc = round(current_close - all_time_low, 4)
-                    
-                    pct_to_high = round(((all_time_high - current_close) / current_close) * 100, 2)
-                    diff_to_high_usdc = round(all_time_high - current_close, 4)
-
-                    return {
-                        "closes": closes,
-                        "volumes": volumes,
-                        "highs": highs,
-                        "lows": lows,
-                        "close": current_close,
-                        "volume": volumes[-1],
-                        "atl": all_time_low,
-                        "ath": all_time_high,
-                        "pct_to_low": pct_to_low,
-                        "diff_to_low_usdc": diff_to_low_usdc,
-                        "pct_to_high": pct_to_high,
-                        "diff_to_high_usdc": diff_to_high_usdc
-                    }
     except Exception as e:
         print(f"Coinbase Fetch error (Sonic): {e}")
+
+    # Uzupełnienie lub wsparcie z lokalnych plików CSV (historia FTM/Sonic od 2019 r.)
+    file_path = "SONIC_FTM_S_1d.csv"
+    historical_stats = {}
+    if os.path.exists(file_path):
+        try:
+            df_csv = pd.read_csv(file_path)
+            csv_closes = df_csv['close'].values
+            csv_highs = df_csv['high'].values
+            csv_lows = df_csv['low'].values
+            
+            if not closes:
+                closes = list(csv_closes[-100:])
+                highs = list(csv_highs[-100:])
+                lows = list(csv_lows[-100:])
+                volumes = list(df_csv['volume'].values[-100:])
+            
+            historical_stats = {
+                "csv_all_time_high": float(csv_highs.max()),
+                "csv_all_time_low": float(csv_lows.min()),
+                "csv_recent_high_180d": float(csv_highs[-180:].max()) if len(csv_highs) >= 180 else float(csv_highs.max()),
+                "csv_recent_low_180d": float(csv_lows[-180:].min()) if len(csv_lows) >= 180 else float(csv_lows.min()),
+            }
+        except Exception as e:
+            print(f"Błąd odczytu lokalnego pliku CSV Sonic: {e}")
+
+    current_close = closes[-1] if closes else 0.0541
+    current_vol = volumes[-1] if volumes else 1500000.0
     
+    atl = historical_stats.get("csv_all_time_low", 0.0017)
+    ath = historical_stats.get("csv_all_time_high", 3.4842)
+    
+    pct_to_low = round(((current_close - atl) / atl) * 100, 2)
+    diff_to_low_usdc = round(current_close - atl, 4)
+    pct_to_high = round(((ath - current_close) / current_close) * 100, 2)
+    diff_to_high_usdc = round(ath - current_close, 4)
+
     return {
-        "closes": [0.054, 0.055, 0.0541],
-        "volumes": [1500000.0],
-        "highs": [0.056],
-        "lows": [0.052],
-        "close": 0.0541,
-        "volume": 1500000.0,
-        "atl": 0.0023,
-        "ath": 3.3092,
-        "pct_to_low": 2250.0,
-        "diff_to_low_usdc": 0.0518,
-        "pct_to_high": 6025.0,
-        "diff_to_high_usdc": 3.2551
+        "close": current_close,
+        "volume": current_vol,
+        "rsi": TradeEngine.calculate_rsi(closes),
+        "macd": TradeEngine.calculate_macd(closes),
+        "atl": atl,
+        "ath": ath,
+        "recent_high_180d": historical_stats.get("csv_recent_high_180d", 0.0739),
+        "recent_low_180d": historical_stats.get("csv_recent_low_180d", 0.0190),
+        "pct_to_low": pct_to_low,
+        "diff_to_low_usdc": diff_to_low_usdc,
+        "pct_to_high": pct_to_high,
+        "diff_to_high_usdc": diff_to_high_usdc,
+        "structural_levels": {
+            "LL_historical": atl,
+            "HL_key_support_1": 0.2622,
+            "HL_key_support_2": 0.3952,
+            "LH_key_resistance_1": 0.8665,
+            "HH_key_resistance_2": 1.4313,
+            "ATH_historical": ath
+        }
     }
 
-async def fetch_binance_btc_comprehensive(session):
-    """Pobiera wielorezolucyjne dane BTC (1w, 1d, 4h, 1h) z Binance wraz z wolumenem, transakcjami i wyliczanym Realized Price proxy."""
-    timeframes = {"1w": "1w", "1d": "1d", "4h": "4h", "1h": "1h"}
-    btc_data = {}
+async def fetch_multi_exchange_btc(session):
+    exchanges = [
+        ("Binance", "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100"),
+        ("OKX", "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=1D&limit=100"),
+        ("Bybit", "https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=D&limit=100")
+    ]
     
-    for tf_key, tf_val in timeframes.items():
-        url = f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval={tf_val}&limit=100"
+    closes_pool, volumes_pool, trades_pool = [], [], []
+    for name, url in exchanges:
         try:
-            async with session.get(url, timeout=8) as resp:
+            async with session.get(url, timeout=5) as resp:
                 if resp.status == 200:
-                    kline_raw = await resp.json()
-                    if isinstance(kline_raw, list) and len(kline_raw) > 0:
-                        # Binance kline format:
-                        # [0: open_time, 1: open, 2: high, 3: low, 4: close, 5: volume, 6: close_time,
-                        #  7: quote_asset_volume, 8: number_of_trades, 9: taker_buy_base_volume, 10: taker_buy_quote_volume]
-                        opens = [float(k[1]) for k in kline_raw]
-                        highs = [float(k[2]) for k in kline_raw]
-                        lows = [float(k[3]) for k in kline_raw]
-                        closes = [float(k[4]) for k in kline_raw]
-                        volumes = [float(k[5]) for k in kline_raw]
-                        quote_volumes = [float(k[7]) for k in kline_raw]
-                        trades_count = [int(k[8]) for k in kline_raw]
-                        taker_buy_base = [float(k[9]) for k in kline_raw]
-                        taker_buy_quote = [float(k[10]) for k in kline_raw]
-                        
-                        rsi = TradeEngine.calculate_rsi(closes)
-                        macd = TradeEngine.calculate_macd(closes)
-                        ema20 = TradeEngine.calculate_ema(closes, 20)
-                        ema50 = TradeEngine.calculate_ema(closes, 50)
-                        ema200 = TradeEngine.calculate_ema(closes, 200 if len(closes) >= 200 else len(closes))
-                        
-                        btc_data[tf_key] = {
-                            "close": closes[-1],
-                            "open": opens[-1],
-                            "high": highs[-1],
-                            "low": lows[-1],
-                            "volume": volumes[-1],
-                            "quote_volume": quote_volumes[-1],
-                            "trades": trades_count[-1],
-                            "taker_buy_base": taker_buy_base[-1],
-                            "taker_buy_quote": taker_buy_quote[-1],
-                            "rsi": rsi,
-                            "macd": macd,
-                            "ema20": ema20,
-                            "ema50": ema50,
-                            "ema200": ema200,
-                            "closes_history": closes
-                        }
-        except Exception as e:
-            print(f"Binance BTC Fetch error ({tf_key}): {e}")
+                    res = await resp.json()
+                    data = res.get("data", res.get("result", {}).get("list", res))
+                    if isinstance(data, list):
+                        for row in data:
+                            closes_pool.append(float(row[4]))
+                            volumes_pool.append(float(row[5]))
+                            trades_pool.append(int(row[8]) if name == "Binance" else 0)
+        except Exception:
+            pass
             
-    # Jeśli brak danych, uzupełnij awaryjnie
-    if not btc_data:
-        btc_data["1d"] = {
-            "close": 80000.0, "volume": 50000.0, "quote_volume": 4000000000.0,
-            "trades": 1200000, "taker_buy_base": 25000.0, "taker_buy_quote": 2000000000.0,
-            "rsi": 50.0, "macd": {"macd": 0, "signal": 0, "hist": 0}, "ema20": 79000.0, "ema50": 75000.0, "ema200": 65000.0,
-            "closes_history": [80000.0]
-        }
-        
-    # Obliczenie przybliżonego wskaźnika Realized Price proxy (średnia ważona wolumenem z dłuższego okresu np. 1D VWAP / koszt bazowy)
-    d1_closes = btc_data.get("1d", {}).get("closes_history", [80000.0])
-    # Realized price proxy jako długoterminowy VWAP lub wykładnicza średnia cena realizacji
-    realized_price_proxy = round(float(np.mean(d1_closes[-90:]) * 0.92), 2) if len(d1_closes) >= 90 else round(float(np.mean(d1_closes) * 0.95), 2)
-    btc_data["realized_price_proxy"] = realized_price_proxy
+    if not closes_pool:
+        closes_pool = [80000.0] * 30
+        volumes_pool = [50000.0] * 30
+        trades_pool = [1000000] * 30
+
+    avg_close = float(np.mean(closes_pool[-30:]) if len(closes_pool) >= 30 else closes_pool[-1])
+    total_vol = float(np.mean(volumes_pool[-30:]) if len(volumes_pool) >= 30 else 50000)
+    avg_trades = int(np.mean(trades_pool[-30:]) if len(trades_pool) >= 30 else 1000000)
     
-    return btc_data
+    rsi = TradeEngine.calculate_rsi(closes_pool)
+    macd = TradeEngine.calculate_macd(closes_pool)
+    realized_price_proxy = round(avg_close * 0.92, 2)
+
+    return {
+        "close": round(avg_close, 2),
+        "volume": round(total_vol, 2),
+        "trades": avg_trades,
+        "rsi": rsi,
+        "macd_hist": macd["hist"],
+        "realized_price_proxy": realized_price_proxy
+    }
 
 
-# --- 3. ZARZĄDZANIE STANEM SYGNAŁÓW I HARMONOGRAMEM ---
+# --- 3. ZARZĄDZANIE STANEM ---
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
@@ -219,7 +217,7 @@ def load_state():
                 return json.load(f)
         except Exception:
             pass
-    return {"last_type": "SHORT", "last_html_date": "", "last_alert_text": ""}
+    return {"last_type": "SHORT", "last_html_date": ""}
 
 def save_state(state):
     try:
@@ -229,8 +227,8 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 4. GENEROWANIE RAPORTÓW PRZEZ AI (GPT-OSS 120B) ---
-def generate_reports(sonic_data, btc_data, last_required_type, should_generate_html, active_alert_text):
+# --- 4. GENEROWANIE RAPORTÓW PRZEZ AI ---
+def generate_reports(sonic_metrics, btc_metrics, last_required_type, should_generate_html, active_alert_text):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
         return None, None, None
@@ -240,33 +238,28 @@ def generate_reports(sonic_data, btc_data, last_required_type, should_generate_h
         api_key=GROQ_API_KEY
     )
 
-    btc_1d_rsi = btc_data.get("1d", {}).get("rsi", 50.0)
-    btc_1d_hist = btc_data.get("1d", {}).get("macd", {}).get("hist", 0.0)
+    btc_rsi = btc_metrics.get("rsi", 50.0)
+    btc_hist = btc_metrics.get("macd_hist", 0.0)
     
     macro_status = "NEUTRALNY"
-    if btc_1d_rsi >= 72 and btc_1d_hist < 0:
+    if btc_rsi >= 72 and btc_hist < 0:
         macro_status = "SZCZYT HOSSY"
-    elif btc_1d_rsi <= 32 and btc_1d_hist > 0:
+    elif btc_rsi <= 32 and btc_hist > 0:
         macro_status = "DNO BESSY"
 
     prompt = f"""
-Jesteś profesjonalnym analitykiem kryptowalutowym. Wykorzystaj pełną wiedzę z backtestu (fale Eliotta, zniesienia Fibonacciego 0.618-0.786, poziomy HH, HL, LH, LL, RSI, MACD, dywergencje, dane wolumenowe, transakcyjne oraz Realized Price). Przygotuj:
+Jesteś profesjonalnym analitykiem kryptowalutowym. Wykorzystaj pełną wiedzę z backtestu (fale Eliotta, zniesienia Fibonacciego, poziomy HH, HL, LH, LL, RSI, MACD, dywergencje, wolumen, transakcje, Realized Price) oraz dostarczone historyczne poziomy ceny dla Sonica (FTM/S). Przygotuj:
 1. Alert cenowy dla Sonica (S) z Coinbase z wymuszonym typem: {last_required_type} na Telegram.
 2. Alert makro dla BTC na Telegram (wyłącznie jeśli status cyklu to Szczyt Hossy lub Dno Bessy). Status: {macro_status}.
-3. {"Dla raportu dziennego HTML na stronie https://piwecki.pl/analiza/ wygeneruj pełną stronę HTML wyłącznie dla BTC oraz Sonic (S). Raport musi zawierać kompletne dane techniczne BTC (ceny, wolumeny, transakcje, szacowany Realized Price, wskaźniki wielorezolucyjne 1w/1d/4h/1h), dane Sonica (w tym położenie procentowe i kwotowe w USDC względem dołka/szczytu), dogłębną analizę makroekonomiczną BTC, najnowsze newsy i sentyment wokół ekosystemu Sonic oraz – jeśli w tym cyklu wygenerowano alert cenowy – WYRAŹNY, CZERWONY POGRUBIONY KOMUNIKAT ALERTU w górnej części strony." if should_generate_html else "HTML: zwróć null."}
+3. {"Dla raportu dziennego HTML na stronie https://piwecki.pl/analiza/ wygeneruj pełną stronę HTML wyłącznie dla BTC oraz Sonic (S). Raport musi zawierać zagregowane dane techniczne BTC, szczegółowe dane Sonica wraz z twardymi poziomami historycznymi, odległością w % i USDC do szczytów/dołków, dogłębną analizę makro, newsy i sentyment oraz – jeśli w tym cyklu wygenerowano alert cenowy – WYRAŹNY, CZERWONY POGRUBIONY KOMUNIKAT ALERTU w górnej części strony." if should_generate_html else "HTML: zwróć null."}
 
-KOMUNIKAT AKTUALNEGO ALERTU CENOWEGO (jeśli występuje w tym cyklu): {active_alert_text}
+KOMUNIKAT ALERTU CENOWEGO: {active_alert_text}
 
-KOMPREHENSYWNE DANE BTC (Binance):
-{json.dumps(btc_data, indent=2)}
+AGREGOWANE DANE BTC (Wielogiełdowe):
+{json.dumps(btc_metrics, indent=2)}
 
-DANE SONIC (Coinbase):
-{json.dumps(sonic_data, indent=2)}
-Położenie Sonica: {sonic_data.get('pct_to_low')}% powyżej dołka ({sonic_data.get('diff_to_low_usdc')} USDC), {sonic_data.get('pct_to_high')}% do szczytu ({sonic_data.get('diff_to_high_usdc')} USDC).
-
-POZIOMY STRUKTURALNE SONICA:
-- Opory / LH: $0.8665, $1.4313
-- Wsparcia / HL / LL: $0.2622, $0.3952, $0.054
+KOMPREHENSYWNE DANE I POZIOMY HISTORYCZNE SONIC (FTM / S):
+{json.dumps(sonic_metrics, indent=2)}
 
 Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z kluczami:
 - "telegram_msg_main": Alert cenowy dla Sonica (HTML Telegram).
@@ -346,7 +339,7 @@ def send_telegram_message(text):
 
 # --- 6. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start systemu analitycznego (Dzienny HTML BTC+Sonic z kompleksowymi danymi cenowymi, wolumenowymi, transakcyjnymi i Realized Price)...")
+    print("Start systemu analitycznego (Zintegrowane poziomy historyczne Sonica + Wielogiełdowe BTC)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -354,31 +347,27 @@ async def main():
     should_generate_html = (state.get("last_html_date") != today_str)
     
     async with aiohttp.ClientSession() as session:
-        sonic_metrics = await fetch_coinbase_sonic(session)
-        btc_metrics = await fetch_binance_btc_comprehensive(session)
+        sonic_metrics = await fetch_and_analyze_sonic(session)
+        btc_metrics = await fetch_multi_exchange_btc(session)
         
         last_type = state.get("last_type", "SHORT")
         next_type = "LONG" if last_type == "SHORT" else "SHORT"
         
-        # Przygotowanie treści alertu cenowego dla pliku HTML
         active_alert_text = f"NOWY SYGNAŁ CENOWY: {next_type} dla Sonica (S)"
         
         main_msg, macro_msg, html_content = generate_reports(
             sonic_metrics, btc_metrics, next_type, should_generate_html, active_alert_text
         )
         
-        # Aktualizacja strony HTML na FTP (zawierającej również komunikat alertu w czerwonej pogrubionej czcionce)
         if should_generate_html and html_content:
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        # Wysyłka alertu dla Sonica na Telegram
         if main_msg:
             send_telegram_message(main_msg)
             state["last_type"] = next_type
             print(f"Wysłano alert cenowy Sonica ({next_type}) na Telegram.")
             
-        # Wysyłka alertu Makro BTC na Telegram (tylko Szczyt Hossy / Dno Bessy)
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
             send_telegram_message(macro_msg)
