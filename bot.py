@@ -45,23 +45,6 @@ class TradeEngine:
         return round(float(100 - (100 / (1 + rs))), 2)
 
     @staticmethod
-    def calculate_ema(prices, period):
-        if not prices:
-            return 0.0
-        if len(prices) < period:
-            period = len(prices)
-        if period <= 0:
-            return float(prices[-1])
-        prices = np.array(prices)
-        weights = np.exp(np.linspace(-1., 0., period))
-        weights /= weights.sum()
-        ema = np.convolve(prices, weights, mode='full')[:len(prices)]
-        idx = min(period, len(ema) - 1)
-        if idx >= 0:
-            ema[:period] = ema[idx]
-        return round(float(ema[-1]), 5)
-
-    @staticmethod
     def calculate_macd(prices, fast=12, slow=26, signal=9):
         if len(prices) < slow + signal:
             return {"macd": 0.0, "signal": 0.0, "hist": 0.0}
@@ -86,8 +69,21 @@ class TradeEngine:
             "hist": round(float(histogram[-1]), 5)
         }
 
+    @staticmethod
+    def detect_structural_pivot(closes, window=14):
+        """Wykrywa czy ostatnia świeca jest rzeczywistym punktem zwrotnym (pivot low/high)."""
+        if len(closes) < window:
+            return False, "NONE"
+        recent = closes[-window:]
+        curr = closes[-1]
+        if curr == min(recent):
+            return True, "LONG" # Dołek - potencjał na Long
+        elif curr == max(recent):
+            return True, "SHORT" # Szczyt - potencjał na Short
+        return False, "NONE"
 
-# --- 2. POBIERANIE I ANALIZA DANYCH SONICA (CSV + Coinbase) ---
+
+# --- 2. POBIERANIE DANYCH SONIC (Coinbase + plik historyczny) ---
 async def fetch_and_analyze_sonic(session):
     url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -144,6 +140,8 @@ async def fetch_and_analyze_sonic(session):
     pct_to_high = round(((ath - current_close) / current_close) * 100, 2)
     diff_to_high_usdc = round(ath - current_close, 4)
 
+    is_pivot, pivot_type = TradeEngine.detect_structural_pivot(closes)
+
     return {
         "close": current_close,
         "volume": current_vol,
@@ -155,6 +153,8 @@ async def fetch_and_analyze_sonic(session):
         "diff_to_low_usdc": diff_to_low_usdc,
         "pct_to_high": pct_to_high,
         "diff_to_high_usdc": diff_to_high_usdc,
+        "is_pivot": is_pivot,
+        "pivot_type": pivot_type,
         "structural_levels": {
             "LL_historical": atl,
             "HL_key_support_1": 0.2622,
@@ -166,7 +166,7 @@ async def fetch_and_analyze_sonic(session):
     }
 
 
-# --- 3. POBIERANJE WIELOGIEŁDOWYCH DANYCH BTC ---
+# --- 3. POBIERANIE DANYCH BTC (Wielogiełdowe) ---
 async def fetch_multi_exchange_btc(session):
     exchanges = [
         ("Binance", "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100"),
@@ -230,8 +230,8 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 5. GENEROWANIE RAPORTÓW PRZEZ AI ---
-def generate_reports(sonic_metrics, btc_metrics, last_required_type, should_generate_html):
+# --- 5. GENERATOR PROFESJONALNEGO RAPORTU HTML I AI ---
+def generate_reports(sonic_metrics, btc_metrics, next_type, is_signal_event):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
         return None, None, None
@@ -253,34 +253,32 @@ def generate_reports(sonic_metrics, btc_metrics, last_required_type, should_gene
     current_date_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     prompt = f"""
-Jesteś profesjonalnym analitykiem kryptowalutowym. Wykorzystaj pełną wiedzę z backtestu (fale Eliotta, zniesienia Fibonacciego, poziomy HH, HL, LH, LL, RSI, MACD, dywergencje, wolumen, transakcje, Realized Price) oraz dostarczone historyczne poziomy ceny dla Sonica (FTM/S). Przygotuj:
+Jesteś starszym analitykiem makroekonomicznym i ekspertem rynków kryptowalut. Przygotuj kompleksowy raport rynkowy.
 
-1. <b>telegram_msg_main</b>: Kompleksowy, czytelny dla laika, ale merytoryczny alert cenowy dla Sonica (S) na Telegram w formacie HTML, zawierający dokładnie w nowych wierszach:
-<b>Sonic - alert cenowy</b>
-<b>Aktualna cena:</b> ${sonic_metrics.get('close')}
-<b>Bieżąca data:</b> {current_date_utc}
-<b>Analiza wolumenu:</b> [szczegółowy opis wolumenu z giełd/Coinbase]
-<b>Położenie ceny względem kluczowych poziomów:</b> [odniesienie do poziomów LL, HL, LH, HH oraz odległości w % i USDC do dołka/szczytu]
-<b>Położenie wskaźników i dywergence:</b> [RSI, MACD, zniesienia Fibo]
-<b>Komentarz i nastroje inwestorów:</b> [podsumowanie sentymentu i newsów wokół projektu Sonic]
-<b>Sugerowana transakcja:</b> {last_required_type}
-<b>Poziom otwarcia / Zasięg / Horyzont czasowy:</b> [konkretne widełki cenowe i czasowe]
+DANE WEJŚCIOWE:
+BTC (Wielogiełdowe): Cena ${btc_metrics.get('close')}, Wolumen 24h {btc_metrics.get('volume')}, Trades {btc_metrics.get('trades')}, RSI(14) {btc_rsi}, MACD Hist {btc_hist}, Realized Price Proxy ${btc_metrics.get('realized_price_proxy')}, Status Cyklu AN-1: {macro_status}.
+SONIC (Coinbase): Cena ${sonic_metrics.get('close')}, Wolumen {sonic_metrics.get('volume')}, RSI {sonic_metrics.get('rsi')}, Dołek hist. ${sonic_metrics.get('atl')} (+{sonic_metrics.get('pct_to_low')}% / {sonic_metrics.get('diff_to_low_usdc')} USDC), Szczyt hist. ${sonic_metrics.get('ath')} (-{sonic_metrics.get('pct_to_high')}% / {sonic_metrics.get('diff_to_high_usdc')} USDC).
+Poziomy strukturalne Sonica: LH $0.8665, $1.4313 | HL $0.2622, $0.3952 | LL $0.054 base.
+Czy jest aktywny alert cenowy na dzisiaj: {"TAK (" + next_type + ")" if is_signal_event else "NIE (Brak zwrotu)"}.
 
-2. <b>telegram_msg_macro</b>: Niezależny alert makro BTC na Telegram (wysyłany TYLKO jeśli status to SZCZYT HOSSY lub DNO BESSY). Status obecny: {macro_status}.
+ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON z 3 kluczami:
+- "telegram_msg_main": (Tylko jeśli is_signal_event==True, inaczej null). Pełny, czytelny alert dla laika na Telegram o wyznaczonym sygnale {next_type} dla Sonica, sformatowany czytelnie od nowych linii.
+- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY lub DNO BESSY, inaczej null).
+- "html_content": Kompletny, profesjonalny kod strony HTML w stylu nowoczesnego Dashboardu Analitycznego (Dark Theme, CSS wewnątrz `<style>`).
 
-3. {"<b>html_content</b>: Pełna strona HTML dla https://piwecki.pl/analiza/ zawierająca dane BTC i Sonica, dogłębną analizę makro, oraz w górnej części wyrazisty, pogrubiony komunikat w czerwonej czcionce z powiadomieniem o nowym sygnale cenowym <b>" + last_required_type + "</b> dla Sonica." if should_generate_html else "<b>html_content</b>: null"}
-
-DANE BTC: {json.dumps(btc_metrics, indent=2)}
-DANE SONIC: {json.dumps(sonic_metrics, indent=2)}
-
-Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z wyżej wymienionymi kluczami.
+WYMAGANIA DOTYCZĄCE HTML:
+1. W górnej części strony umieść sekcję statusu. Jeśli jest aktywny alert ({is_signal_event}), wyrenderuj wielki, czerwony, pogrubiony baner:
+`<div style="background:#8b0000; color:#fff; padding:20px; border-radius:8px; font-weight:bold; font-size:1.4em; text-align:center; margin-bottom:20px;">🚨 UWAAGA: NOWY ALERT CENOWY DLA SONIC (S): SYGNAŁ {next_type} 🚨</div>`
+2. KARTY STATYSTYCZNE (KPI): Cena BTC, Realized Price Proxy, Cena Sonic, Odległość Sonic do ATL (+% / USDC), Odległość Sonic do ATH (-% / USDC).
+3. SEKCJA 1: DOKŁADNA ANALIZA MACRO BTC. Omów kontekst stóp procentowych FED, płynność globalną, zachowanie wskaźnika Realized Price oraz model cyklu AN-1 (status: {macro_status}).
+4. SEKCJA 2: ANALIZA SONIC (S). Przeanalizuj zachowanie cenowe przy kluczowych poziomach strukturalnych (LH/HL/LL), sentyment inwestorów, nastroje rynkowe oraz najświeższe wiadomości ze świata Sonica.
 """
 
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
+                {"role": "system", "content": "Jesteś ekspertem rynkowym i programistą generującym dopracowane pliki HTML i JSON."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
@@ -348,7 +346,7 @@ def send_telegram_message(text):
 
 # --- 7. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start systemu analitycznego (Pełne komunikaty analityczne na Telegram + HTML)...")
+    print("Start monitora (Zaawansowana analiza HTML makro BTC + Sonic, filtrowanie alertów Telegram)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -362,18 +360,25 @@ async def main():
         last_type = state.get("last_type", "SHORT")
         next_type = "LONG" if last_type == "SHORT" else "SHORT"
         
+        # Wiadomość na Telegram jest generowana TYLKO wtedy, gdy wykryjemy pivot zwrotny zgodny z alternacją
+        is_signal_event = sonic_metrics.get("is_pivot", False) and (sonic_metrics.get("pivot_type") == next_type)
+        
         main_msg, macro_msg, html_content = generate_reports(
-            sonic_metrics, btc_metrics, next_type, should_generate_html
+            sonic_metrics, btc_metrics, next_type, is_signal_event
         )
         
+        # FTP HTML zaktualizuje się raz na dobę
         if should_generate_html and html_content:
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        if main_msg:
+        # Wysyłka wiadomości na Telegram TYLKO przy realnym sygnale zwrotnym
+        if is_signal_event and main_msg:
             send_telegram_message(main_msg)
             state["last_type"] = next_type
-            print(f"Wysłano pełny alert cenowy Sonica ({next_type}) na Telegram.")
+            print(f"Wysłano alert cenowy Sonica ({next_type}) na Telegram.")
+        else:
+            print("Brak momentu zwrotnego na Sonicu – Telegram milczy.")
             
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
