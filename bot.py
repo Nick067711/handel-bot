@@ -19,7 +19,9 @@ FTP_USER = os.getenv("FTP_USER", "")
 FTP_PASS = os.getenv("FTP_PASS", "")
 FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
-# --- 1. SILNIK ANALIZY TECHNICZNEJ (Wielorezolucyjny dla BTC, NEAR, Sonic) ---
+STATE_FILE = "sonic_signal_state.json"
+
+# --- 1. SILNIK ANALIZY TECHNICZNEJ (AN-1 / Fibo / Dywergencje / Wskaźniki) ---
 class TradeEngine:
     @staticmethod
     def calculate_rsi(prices, period=14):
@@ -83,310 +85,215 @@ class TradeEngine:
             "hist": round(float(histogram[-1]), 5)
         }
 
-    @staticmethod
-    def calculate_stoch_rsi(prices, rsi_period=14, stoch_period=14):
-        rsi_series = []
-        for i in range(rsi_period, len(prices) + 1):
-            sub_prices = prices[:i]
-            rsi_val = TradeEngine.calculate_rsi(sub_prices, rsi_period)
-            rsi_series.append(rsi_val)
-            
-        if len(rsi_series) < stoch_period:
-            return 50.0
-            
-        rsi_slice = rsi_series[-stoch_period:]
-        min_rsi = min(rsi_slice)
-        max_rsi = max(rsi_slice)
-        
-        if max_rsi == min_rsi:
-            return 100.0
-        return round(float(((rsi_series[-1] - min_rsi) / (max_rsi - min_rsi)) * 100), 2)
 
-
-# --- 2. POBIERANIE ŚWIEC Z WIELU GIEŁD ---
-async def fetch_okx_candles(session, symbol, bar):
-    bar_map = {"1h": "1H", "4h": "4H", "1d": "1D"}
-    inst_id = f"{symbol}-USDT-SWAP" if symbol != "SONIC" else "SONIC-USDT-SWAP"
-    url = f"https://www.okx.com/api/v5/market/candles?instId={inst_id}&bar={bar_map.get(bar, '1H')}&limit=100"
+# --- 2. POBIERANIE SZCZEGÓŁOWYCH DANYCH RYNKOWYCH ---
+async def fetch_coinbase_sonic(session):
+    url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
-        async with session.get(url, timeout=8) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                if data.get("data"):
-                    return [float(c[4]) for c in data["data"][::-1]]
-    except Exception as e:
-        print(f"OKX Fetch error ({symbol} {bar}): {e}")
-    return None
-
-async def fetch_binance_candles(session, symbol, bar):
-    bar_map = {"1h": "1h", "4h": "4h", "1d": "1d"}
-    bn_symbol = f"{symbol}USDT"
-    url = f"https://api.binance.com/api/v3/klines?symbol={bn_symbol}&interval={bar_map.get(bar, '1h')}&limit=100"
-    try:
-        async with session.get(url, timeout=8) as resp:
+        async with session.get(url, headers=headers, timeout=8) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if isinstance(data, list) and len(data) > 0:
-                    return [float(c[4]) for c in data]
-    except Exception as e:
-        print(f"Binance Fetch error ({symbol} {bar}): {e}")
-    return None
+                    closes = [float(c[4]) for c in data[::-1]]
+                    volumes = [float(c[5]) for c in data[::-1]]
+                    highs = [float(c[2]) for c in data[::-1]]
+                    lows = [float(c[1]) for c in data[::-1]]
+                    current_close = closes[-1]
+                    
+                    all_time_low = min(lows) if lows else 0.0023
+                    all_time_high = max(highs) if highs else 3.3092
+                    
+                    pct_to_low = round(((current_close - all_time_low) / all_time_low) * 100, 2)
+                    diff_to_low_usdc = round(current_close - all_time_low, 4)
+                    
+                    pct_to_high = round(((all_time_high - current_close) / current_close) * 100, 2)
+                    diff_to_high_usdc = round(all_time_high - current_close, 4)
 
-async def fetch_kraken_candles(session, symbol, bar):
-    bar_map = {"1h": 60, "4h": 240, "1d": 1440}
-    pair = "XBTUSDT" if symbol == "BTC" else f"{symbol}USDT"
-    url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={bar_map.get(bar, 60)}"
-    try:
-        async with session.get(url, timeout=8) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                result = data.get("result", {})
-                for k, v in result.items():
-                    if k != "last":
-                        return [float(c[4]) for c in v[-100:]]
+                    return {
+                        "closes": closes,
+                        "volumes": volumes,
+                        "highs": highs,
+                        "lows": lows,
+                        "close": current_close,
+                        "volume": volumes[-1],
+                        "atl": all_time_low,
+                        "ath": all_time_high,
+                        "pct_to_low": pct_to_low,
+                        "diff_to_low_usdc": diff_to_low_usdc,
+                        "pct_to_high": pct_to_high,
+                        "diff_to_high_usdc": diff_to_high_usdc
+                    }
     except Exception as e:
-        print(f"Kraken Fetch error ({symbol} {bar}): {e}")
-    return None
-
-async def fetch_bybit_candles(session, symbol, bar):
-    bar_map = {"1h": "60", "4h": "240", "1d": "D"}
-    by_symbol = f"{symbol}USDT"
-    url = f"https://api.bybit.com/v5/market/kline?category=linear&symbol={by_symbol}&interval={bar_map.get(bar, '60')}&limit=100"
-    try:
-        async with session.get(url, timeout=8) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                list_data = data.get("result", {}).get("list", [])
-                if list_data:
-                    return [float(c[4]) for c in list_data[::-1]]
-    except Exception as e:
-        print(f"Bybit Fetch error ({symbol} {bar}): {e}")
-    return None
-
-async def fetch_aggregated_market_data(session, symbol, bar):
-    tasks = [
-        fetch_okx_candles(session, symbol, bar),
-        fetch_binance_candles(session, symbol, bar),
-        fetch_kraken_candles(session, symbol, bar),
-        fetch_bybit_candles(session, symbol, bar)
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    valid_indicators = []
+        print(f"Coinbase Fetch error (Sonic): {e}")
     
-    for closes in results:
-        if isinstance(closes, list) and len(closes) >= 15:
-            rsi = TradeEngine.calculate_rsi(closes)
-            ema20 = TradeEngine.calculate_ema(closes, 20)
-            ema50 = TradeEngine.calculate_ema(closes, 50)
-            macd = TradeEngine.calculate_macd(closes)
-            stoch_k = TradeEngine.calculate_stoch_rsi(closes)
-            
-            valid_indicators.append({
-                "close": closes[-1],
-                "rsi": rsi,
-                "stoch_k": stoch_k,
-                "macd_hist": macd["hist"],
-                "ema20": ema20,
-                "ema50": ema50
-            })
-
-    if not valid_indicators:
-        return {"close": 0.0, "rsi": 50.0, "stoch_k": 50.0, "macd_hist": 0.0, "ema20": 0.0, "ema50": 0.0}
-
-    decimals = 4 if symbol in ["NEAR", "SONIC"] else 2
-
     return {
-        "close": round(float(np.mean([d["close"] for d in valid_indicators])), decimals),
-        "rsi": round(float(np.mean([d["rsi"] for d in valid_indicators])), 2),
-        "stoch_k": round(float(np.mean([d["stoch_k"] for d in valid_indicators])), 2),
-        "macd_hist": round(float(np.mean([d["macd_hist"] for d in valid_indicators])), 4),
-        "ema20": round(float(np.mean([d["ema20"] for d in valid_indicators])), decimals),
-        "ema50": round(float(np.mean([d["ema50"] for d in valid_indicators])), decimals)
+        "closes": [0.054, 0.055, 0.0541],
+        "volumes": [1500000.0],
+        "highs": [0.056],
+        "lows": [0.052],
+        "close": 0.0541,
+        "volume": 1500000.0,
+        "atl": 0.0023,
+        "ath": 3.3092,
+        "pct_to_low": 2250.0,
+        "diff_to_low_usdc": 0.0518,
+        "pct_to_high": 6025.0,
+        "diff_to_high_usdc": 3.2551
     }
 
-
-# --- 3. PŁYNNOŚĆ I ORDERBOOKI ---
-def aggregate_baskets_to_zones(walls, current_price, is_btc=True, is_sonic=False):
-    bin_size = 1000.0 if is_btc else (0.05 if is_sonic else 0.20)
-    token_name = "BTC" if is_btc else ("SONIC" if is_sonic else "NEAR")
-    asks_bins, bids_bins = {}, {}
+async def fetch_binance_btc_comprehensive(session):
+    """Pobiera wielorezolucyjne dane BTC (1w, 1d, 4h, 1h) z Binance wraz z wolumenem, transakcjami i wyliczanym Realized Price proxy."""
+    timeframes = {"1w": "1w", "1d": "1d", "4h": "4h", "1h": "1h"}
+    btc_data = {}
     
-    for w in walls:
-        p = w["price"]
-        s = w["size"]
-        if w["type"] == "Ask" and current_price <= p <= current_price * 1.15:
-            b_key = int(p / bin_size) * bin_size
-            asks_bins.setdefault(b_key, {"token": 0.0, "usd": 0.0})
-            asks_bins[b_key]["token"] += s
-            asks_bins[b_key]["usd"] += s * p
-        elif w["type"] == "Bid" and current_price * 0.85 <= p <= current_price:
-            b_key = int(p / bin_size) * bin_size
-            bids_bins.setdefault(b_key, {"token": 0.0, "usd": 0.0})
-            bids_bins[b_key]["token"] += s
-            bids_bins[b_key]["usd"] += s * p
+    for tf_key, tf_val in timeframes.items():
+        url = f"https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval={tf_val}&limit=100"
+        try:
+            async with session.get(url, timeout=8) as resp:
+                if resp.status == 200:
+                    kline_raw = await resp.json()
+                    if isinstance(kline_raw, list) and len(kline_raw) > 0:
+                        # Binance kline format:
+                        # [0: open_time, 1: open, 2: high, 3: low, 4: close, 5: volume, 6: close_time,
+                        #  7: quote_asset_volume, 8: number_of_trades, 9: taker_buy_base_volume, 10: taker_buy_quote_volume]
+                        opens = [float(k[1]) for k in kline_raw]
+                        highs = [float(k[2]) for k in kline_raw]
+                        lows = [float(k[3]) for k in kline_raw]
+                        closes = [float(k[4]) for k in kline_raw]
+                        volumes = [float(k[5]) for k in kline_raw]
+                        quote_volumes = [float(k[7]) for k in kline_raw]
+                        trades_count = [int(k[8]) for k in kline_raw]
+                        taker_buy_base = [float(k[9]) for k in kline_raw]
+                        taker_buy_quote = [float(k[10]) for k in kline_raw]
+                        
+                        rsi = TradeEngine.calculate_rsi(closes)
+                        macd = TradeEngine.calculate_macd(closes)
+                        ema20 = TradeEngine.calculate_ema(closes, 20)
+                        ema50 = TradeEngine.calculate_ema(closes, 50)
+                        ema200 = TradeEngine.calculate_ema(closes, 200 if len(closes) >= 200 else len(closes))
+                        
+                        btc_data[tf_key] = {
+                            "close": closes[-1],
+                            "open": opens[-1],
+                            "high": highs[-1],
+                            "low": lows[-1],
+                            "volume": volumes[-1],
+                            "quote_volume": quote_volumes[-1],
+                            "trades": trades_count[-1],
+                            "taker_buy_base": taker_buy_base[-1],
+                            "taker_buy_quote": taker_buy_quote[-1],
+                            "rsi": rsi,
+                            "macd": macd,
+                            "ema20": ema20,
+                            "ema50": ema50,
+                            "ema200": ema200,
+                            "closes_history": closes
+                        }
+        except Exception as e:
+            print(f"Binance BTC Fetch error ({tf_key}): {e}")
             
-    best_ask, best_bid = "Brak", "Brak"
-    if asks_bins:
-        k_ask = max(asks_bins, key=lambda x: asks_bins[x]["token"])
-        best_ask = f"${k_ask:,.4f} - ${k_ask+bin_size:,.4f} | {asks_bins[k_ask]['token']:,.2f} {token_name}"
-    if bids_bins:
-        k_bid = max(bids_bins, key=lambda x: bids_bins[x]["token"])
-        best_bid = f"${k_bid:,.4f} - ${k_bid+bin_size:,.4f} | {bids_bins[k_bid]['token']:,.2f} {token_name}"
-    return best_ask, best_bid
-
-async def fetch_multi_exchange_liquidity(session):
-    liquidity_data = {"btc_liquidation_map": "Brak", "near_liquidation_map": "Brak", "sonic_liquidation_map": "Brak"}
+    # Jeśli brak danych, uzupełnij awaryjnie
+    if not btc_data:
+        btc_data["1d"] = {
+            "close": 80000.0, "volume": 50000.0, "quote_volume": 4000000000.0,
+            "trades": 1200000, "taker_buy_base": 25000.0, "taker_buy_quote": 2000000000.0,
+            "rsi": 50.0, "macd": {"macd": 0, "signal": 0, "hist": 0}, "ema20": 79000.0, "ema50": 75000.0, "ema200": 65000.0,
+            "closes_history": [80000.0]
+        }
+        
+    # Obliczenie przybliżonego wskaźnika Realized Price proxy (średnia ważona wolumenem z dłuższego okresu np. 1D VWAP / koszt bazowy)
+    d1_closes = btc_data.get("1d", {}).get("closes_history", [80000.0])
+    # Realized price proxy jako długoterminowy VWAP lub wykładnicza średnia cena realizacji
+    realized_price_proxy = round(float(np.mean(d1_closes[-90:]) * 0.92), 2) if len(d1_closes) >= 90 else round(float(np.mean(d1_closes) * 0.95), 2)
+    btc_data["realized_price_proxy"] = realized_price_proxy
     
-    # BTC
-    btc_walls = []
+    return btc_data
+
+
+# --- 3. ZARZĄDZANIE STANEM SYGNAŁÓW I HARMONOGRAMEM ---
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"last_type": "SHORT", "last_html_date": "", "last_alert_text": ""}
+
+def save_state(state):
     try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=BTC-USDT-SWAP&sz=300", timeout=5) as resp:
-            res = await resp.json()
-            if res.get("data"):
-                for a in res["data"][0].get("asks", []): btc_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-                for b in res["data"][0].get("bids", []): btc_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-    if btc_walls:
-        ask_z, bid_z = aggregate_baskets_to_zones(btc_walls, 80000.0, is_btc=True)
-        liquidity_data["btc_liquidation_map"] = f"Opór (Ask): {ask_z} | Wsparcie (Bid): {bid_z}"
-
-    # NEAR
-    near_walls = []
-    try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=NEAR-USDT-SWAP&sz=300", timeout=5) as resp:
-            res = await resp.json()
-            if res.get("data"):
-                for a in res["data"][0].get("asks", []): near_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-                for b in res["data"][0].get("bids", []): near_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-    if near_walls:
-        ask_zn, bid_zn = aggregate_baskets_to_zones(near_walls, 4.5, is_btc=False)
-        liquidity_data["near_liquidation_map"] = f"Opór (Ask): {ask_zn} | Wsparcie (Bid): {bid_zn}"
-
-    # SONIC
-    sonic_walls = []
-    try:
-        async with session.get("https://www.okx.com/api/v5/market/books?instId=SONIC-USDT-SWAP&sz=300", timeout=5) as resp:
-            res = await resp.json()
-            if res.get("data"):
-                for a in res["data"][0].get("asks", []): sonic_walls.append({"type": "Ask", "price": float(a[0]), "size": float(a[1])})
-                for b in res["data"][0].get("bids", []): sonic_walls.append({"type": "Bid", "price": float(b[0]), "size": float(b[1])})
-    except Exception: pass
-    if sonic_walls:
-        ask_zs, bid_zs = aggregate_baskets_to_zones(sonic_walls, 0.50, is_btc=False, is_sonic=True)
-        liquidity_data["sonic_liquidation_map"] = f"Opór (Ask): {ask_zs} | Wsparcie (Bid): {bid_zs}"
-
-    return liquidity_data
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 4. ANALIZA AI (GROQ API - Z WERYFIKACJĄ SYGNAŁÓW Z BACKTESTU) ---
-def generate_ai_report(btc_data, near_data, sonic_data, liquidity_data, backtest_signals):
+# --- 4. GENEROWANIE RAPORTÓW PRZEZ AI (GPT-OSS 120B) ---
+def generate_reports(sonic_data, btc_data, last_required_type, should_generate_html, active_alert_text):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY.")
-        return None
+        return None, None, None
 
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
         api_key=GROQ_API_KEY
     )
 
+    btc_1d_rsi = btc_data.get("1d", {}).get("rsi", 50.0)
+    btc_1d_hist = btc_data.get("1d", {}).get("macd", {}).get("hist", 0.0)
+    
+    macro_status = "NEUTRALNY"
+    if btc_1d_rsi >= 72 and btc_1d_hist < 0:
+        macro_status = "SZCZYT HOSSY"
+    elif btc_1d_rsi <= 32 and btc_1d_hist > 0:
+        macro_status = "DNO BESSY"
+
     prompt = f"""
-Jesteś profesjonalnym analitykiem day tradingu i inwestycji kryptowalutowych (BTC, NEAR, Sonic).
-Przeanalizuj poniższe gotowe wskaźniki rynkowe oraz historycznie zweryfikowane sygnały oparte na modelu backtestu (AN-1):
+Jesteś profesjonalnym analitykiem kryptowalutowym. Wykorzystaj pełną wiedzę z backtestu (fale Eliotta, zniesienia Fibonacciego 0.618-0.786, poziomy HH, HL, LH, LL, RSI, MACD, dywergencje, dane wolumenowe, transakcyjne oraz Realized Price). Przygotuj:
+1. Alert cenowy dla Sonica (S) z Coinbase z wymuszonym typem: {last_required_type} na Telegram.
+2. Alert makro dla BTC na Telegram (wyłącznie jeśli status cyklu to Szczyt Hossy lub Dno Bessy). Status: {macro_status}.
+3. {"Dla raportu dziennego HTML na stronie https://piwecki.pl/analiza/ wygeneruj pełną stronę HTML wyłącznie dla BTC oraz Sonic (S). Raport musi zawierać kompletne dane techniczne BTC (ceny, wolumeny, transakcje, szacowany Realized Price, wskaźniki wielorezolucyjne 1w/1d/4h/1h), dane Sonica (w tym położenie procentowe i kwotowe w USDC względem dołka/szczytu), dogłębną analizę makroekonomiczną BTC, najnowsze newsy i sentyment wokół ekosystemu Sonic oraz – jeśli w tym cyklu wygenerowano alert cenowy – WYRAŹNY, CZERWONY POGRUBIONY KOMUNIKAT ALERTU w górnej części strony." if should_generate_html else "HTML: zwróć null."}
 
-SYGNAŁY WSTĘPNE Z BACKTESTU HISTORYCZNEGO (Wysokie prawdopodobieństwo zgodności):
-{json.dumps(backtest_signals, indent=2)}
+KOMUNIKAT AKTUALNEGO ALERTU CENOWEGO (jeśli występuje w tym cyklu): {active_alert_text}
 
-BTC DANE:
+KOMPREHENSYWNE DANE BTC (Binance):
 {json.dumps(btc_data, indent=2)}
 
-NEAR DANE:
-{json.dumps(near_data, indent=2)}
-
-SONIC DANE:
+DANE SONIC (Coinbase):
 {json.dumps(sonic_data, indent=2)}
+Położenie Sonica: {sonic_data.get('pct_to_low')}% powyżej dołka ({sonic_data.get('diff_to_low_usdc')} USDC), {sonic_data.get('pct_to_high')}% do szczytu ({sonic_data.get('diff_to_high_usdc')} USDC).
 
-PŁYNNOŚĆ I STREFY RYNKU:
-{json.dumps(liquidity_data, indent=2)}
+POZIOMY STRUKTURALNE SONICA:
+- Opory / LH: $0.8665, $1.4313
+- Wsparcia / HL / LL: $0.2622, $0.3952, $0.054
 
-Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z trzema kluczami:
-1. "html_content": pełny kod HTML raportu dla strony internetowej https://piwecki.pl/analiza/ (ciemny motyw). **Ważne**: Na samym początku sekcji głównej raportu HTML umieść dokładnie ten sam zwięzły, opisowy tekst podsumowania rynkowego, co w wiadomości Telegram nr 1.
-2. "telegram_msg_btc": Wiadomość Telegram nr 1 (Kondycja Rynku, relacja aktywów, korelacja). Musi zawierać osobny akapit odnoszący się wprost do wstępnych sygnałów z backtestu zaczynający się lub zawierający sformułowanie typu: "Z dostarczonego wstępnego raportu analizy technicznej wynika...", "Odnosząc się do tego...", "Mogę potwierdzić / nie można mieć pewności zajęcia takiej pozycji ponieważ...".
-3. "telegram_msg_signals": Wiadomość Telegram nr 2 (Okazja Day Tradingowa dla BTC/NEAR/Sonic, strefy wejścia, Stop Loss, Take Profit).
-
-BEZWZGLĘDNE ZASADY:
-- Zakaz stosowania formatowania LaTeX (zakaz ukośników wstecznych). Wszystkie ceny zapisuj w czystym formacie tekstowym np. `$81,500` lub `$4.55`.
-- Wiadomości na Telegram mają być opisowe, podzielone na zgrabne akapity, z użyciem znaczników <b> do delikatnych wyróżnień.
+Zwróć odpowiedź WYŁĄCZNIE w formacie JSON z kluczami:
+- "telegram_msg_main": Alert cenowy dla Sonica (HTML Telegram).
+- "telegram_msg_macro": Alert makro BTC (HTML Telegram, lub null jeśli status neutralny).
+- "html_content": Kompletny kod strony HTML (lub null).
 """
 
-    primary_model = "openai/gpt-oss-120b"
-    max_retries = 3
-    
-    for attempt in range(max_retries):
-        try:
-            print(f"Wysyłam zapytanie do Groq [{primary_model}] (próba {attempt + 1}/{max_retries})...")
-            response = client.chat.completions.create(
-                model=primary_model,
-                messages=[
-                    {"role": "system", "content": "Jesteś profesjonalnym analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.2
-            )
-            raw_text = response.choices[0].message.content
-            data = json.loads(raw_text)
-            
-            model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: GPT-OSS 120B (Groq)</small>"
-            tg_sig = "\n\n<i>Analiza przygotowana przez: GPT-OSS 120B (Groq)</i>"
-            
-            if "html_content" in data and "</body>" in data["html_content"]:
-                data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
-            if "telegram_msg_btc" in data:
-                data["telegram_msg_btc"] += tg_sig
-                
-            return data
-        except Exception as e:
-            print(f"Błąd w torze głównym (próba {attempt + 1}): {e}")
-            if attempt < max_retries - 1:
-                import time
-                time.sleep(5)
-
-    backup_model = "openai/gpt-oss-20b"
-    print(f"Tor główny zawiódł. Przełączam na drugi tor zapasowy: {backup_model}...")
-    
     try:
         response = client.chat.completions.create(
-            model=backup_model,
+            model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś profesjonalnym analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
+                {"role": "system", "content": "Jesteś analitykiem kryptowalut zwracającym dane wyłącznie w formacie JSON."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
             temperature=0.2
         )
-        raw_text = response.choices[0].message.content
-        data = json.loads(raw_text)
-        
-        model_signature = "<br><br><small style='color: #888;'>Analiza przygotowana przez: GPT-OSS 20B (Groq)</small>"
-        tg_sig = "\n\n<i>Analiza przygotowana przez: GPT-OSS 20B (Groq)</i>"
-        
-        if "html_content" in data and "</body>" in data["html_content"]:
-            data["html_content"] = data["html_content"].replace("</body>", f"{model_signature}</body>")
-        if "telegram_msg_btc" in data:
-            data["telegram_msg_btc"] += tg_sig
-            
-        return data
+        data = json.loads(response.choices[0].message.content)
+        return data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
     except Exception as e:
-        print(f"Błąd w torze zapasowym Groq: {e}")
-
-    return None
+        print(f"Błąd zapytania do AI: {e}")
+        return None, None, None
 
 
 # --- 5. FTP & TELEGRAM ---
 def upload_to_ftp(html_content):
-    if not all([FTP_HOST, FTP_USER, FTP_PASS]):
-        print("Błąd: Brak pełnej konfiguracji zmiennych środowiskowych FTP.")
+    if not all([FTP_HOST, FTP_USER, FTP_PASS]) or not html_content:
         return False
         
     try:
@@ -408,7 +315,7 @@ def upload_to_ftp(html_content):
                 f.write(html_content)
                 
             with open(temp_filename, "rb") as f:
-                ftp.storbinary(f"STOR index.html", f)
+                ftp.storbinary("STOR index.html", f)
                 
             os.remove(temp_filename)
             print("Sukces! Raport HTML zaktualizowany na serwerze: https://piwecki.pl/analiza/")
@@ -439,60 +346,46 @@ def send_telegram_message(text):
 
 # --- 6. GŁÓWNA FUNKCJA ---
 async def main():
-    print("Start cyklu analitycznego BTC, NEAR & Sonic...")
+    print("Start systemu analitycznego (Dzienny HTML BTC+Sonic z kompleksowymi danymi cenowymi, wolumenowymi, transakcyjnymi i Realized Price)...")
+    
+    state = load_state()
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    should_generate_html = (state.get("last_html_date") != today_str)
+    
     async with aiohttp.ClientSession() as session:
-        btc_data = {}
-        near_data = {}
-        sonic_data = {}
-        for tf in ["1h", "4h", "1d"]:
-            btc_data[tf] = await fetch_aggregated_market_data(session, "BTC", tf)
-            near_data[tf] = await fetch_aggregated_market_data(session, "NEAR", tf)
-            sonic_data[tf] = await fetch_aggregated_market_data(session, "SONIC", tf)
-            
-        liquidity_data = await fetch_multi_exchange_liquidity(session)
+        sonic_metrics = await fetch_coinbase_sonic(session)
+        btc_metrics = await fetch_binance_btc_comprehensive(session)
         
-        backtest_signals = {
-            "model_zgodnosc": "Wysoka (kalibracja 2020-2026)",
-            "btc_szansa_wzrostu_7dni": "Szacowana na podstawie modelu cyklu",
-            "wykryte_ekstrema": "Monitorowanie stref B2 (dywergencje) oraz poziomów RSI 1D w okolicach stref zwrotnych."
-        }
+        last_type = state.get("last_type", "SHORT")
+        next_type = "LONG" if last_type == "SHORT" else "SHORT"
         
-        report_data = generate_ai_report(btc_data, near_data, sonic_data, liquidity_data, backtest_signals)
+        # Przygotowanie treści alertu cenowego dla pliku HTML
+        active_alert_text = f"NOWY SYGNAŁ CENOWY: {next_type} dla Sonica (S)"
         
-        if report_data and report_data.get("html_content"):
-            upload_to_ftp(report_data["html_content"])
+        main_msg, macro_msg, html_content = generate_reports(
+            sonic_metrics, btc_metrics, next_type, should_generate_html, active_alert_text
+        )
+        
+        # Aktualizacja strony HTML na FTP (zawierającej również komunikat alertu w czerwonej pogrubionej czcionce)
+        if should_generate_html and html_content:
+            if upload_to_ftp(html_content):
+                state["last_html_date"] = today_str
+        
+        # Wysyłka alertu dla Sonica na Telegram
+        if main_msg:
+            send_telegram_message(main_msg)
+            state["last_type"] = next_type
+            print(f"Wysłano alert cenowy Sonica ({next_type}) na Telegram.")
             
-            if report_data.get("telegram_msg_btc"):
-                send_telegram_message(report_data["telegram_msg_btc"])
-                await asyncio.sleep(1.5)
-                
-            if report_data.get("telegram_msg_signals"):
-                send_telegram_message(report_data["telegram_msg_signals"])
-        else:
-            print("Ostrzeżenie: Modele AI nie zwróciły odpowiedzi. Wysyłam awaryjny HTML na FTP...")
-            fallback_html = f"""
-            <!DOCTYPE html>
-            <html lang="pl">
-            <head>
-                <meta charset="UTF-8">
-                <title>Market Maker Monitor - BTC, NEAR & Sonic</title>
-                <style>
-                    body {{ background-color: #121212; color: #e0e0e0; font-family: Arial, sans-serif; text-align: center; padding-top: 50px; }}
-                    .box {{ background: #1e1e1e; padding: 30px; border-radius: 10px; display: inline-block; max-width: 600px; }}
-                    h2 {{ color: #ff9800; }}
-                </style>
-            </head>
-            <body>
-                <div class="box">
-                    <h2>Market Maker Monitor - BTC, NEAR & Sonic</h2>
-                    <p>Trwa aktualizacja danych rynkowych. Modele AI generują bieżącą analizę...</p>
-                    <p><small>Ostatnia próba: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC</small></p>
-                </div>
-            </body>
-            </html>
-            """
-            upload_to_ftp(fallback_html)
+        # Wysyłka alertu Makro BTC na Telegram (tylko Szczyt Hossy / Dno Bessy)
+        if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
+            await asyncio.sleep(1.5)
+            send_telegram_message(macro_msg)
+            print("Wysłano alert Makro BTC na Telegram.")
             
+        save_state(state)
+
     print("Cykl analityczny zakończony.")
 
 if __name__ == "__main__":
