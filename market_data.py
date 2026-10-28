@@ -105,20 +105,18 @@ async def okx_ticker(session, inst):
 
 # ----------------------------------------------------------------- BTC: dane on-chain i pochodne
 async def coinmetrics_btc(session):
-    """Realized cap / podaż / MVRV z darmowego API społeczności Coin Metrics."""
+    """Zapas: MVRV z darmowego API Coin Metrics. Realized price = cena / MVRV
+    (CapRealUSD nie jest dostępny w wersji darmowej)."""
     d = await get_json(session, "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics",
-                       {"assets": "btc", "metrics": "CapRealUSD,SplyCur,CapMVRVCur", "frequency": "1d",
+                       {"assets": "btc", "metrics": "PriceUSD,CapMVRVCur", "frequency": "1d",
                         "page_size": 8, "paging_from": "end"})
-    rows = d.get("data") or []
+    rows = [r for r in (d.get("data") or []) if r.get("CapMVRVCur") and r.get("PriceUSD")]
     if not rows:
         raise RuntimeError("brak danych")
     last = rows[-1]
-    real_cap, supply = float(last["CapRealUSD"]), float(last["SplyCur"])
-    out = dict(source="Coin Metrics (community)", date=last["time"][:10], realized_price=real_cap / supply,
-               mvrv=float(last["CapMVRVCur"]) if last.get("CapMVRVCur") else None)
-    if len(rows) >= 8 and rows[0].get("CapMVRVCur"):
-        out["mvrv_7d_ago"] = float(rows[0]["CapMVRVCur"])
-    return out
+    mvrv = float(last["CapMVRVCur"])
+    return dict(source="Coin Metrics (community)", date=last["time"][:10],
+                realized_price=float(last["PriceUSD"]) / mvrv, mvrv=mvrv)
 
 
 def _first_number(obj, prefer=()):

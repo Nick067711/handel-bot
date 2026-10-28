@@ -254,35 +254,77 @@ async def fetch_btc(session, errors, full):
             M.safe(M.hyperliquid_btc(session), "Hyperliquid", errors),
             M.safe(M.okx_btc_derivs(session), "OKX kontrakty", errors),
             M.safe(M.deribit_btc(session), "Deribit", errors))
-        onchain = await M.safe(M.coinmetrics_btc(session), "Coin Metrics", errors)
-        if not onchain:
-            rp = await M.safe(M.bitcoin_data_last(session, "realized-price", ("realizedPrice", "realized_price")), "bitcoin-data realized price", errors)
-            mv = await M.safe(M.bitcoin_data_last(session, "mvrv", ("mvrv",)), "bitcoin-data MVRV", errors)
-            if rp or mv:
-                onchain = dict(source="BGeometrics (bitcoin-data.com)", realized_price=rp, mvrv=mv)
+        # realized price i MVRV: najpierw BGeometrics (darmowe, 8 zapytań/h), potem Coin Metrics jako zapas
+        rp = await M.safe(M.bitcoin_data_last(session, "realized-price", ("realizedPrice", "realized_price")), "bitcoin-data realized price", errors)
+        mv = await M.safe(M.bitcoin_data_last(session, "mvrv", ("mvrv",)), "bitcoin-data MVRV", errors)
+        if rp and not (0.1 * price < rp < 2 * price):
+            print(f"[BTC] odrzucam podejrzaną wartość realized price: {rp}")
+            rp = None
+        if rp:
+            onchain = dict(source="BGeometrics (bitcoin-data.com)", realized_price=rp, mvrv=mv or (price / rp))
+            print(f"[BTC] realized price {rp:,.0f} USD, MVRV {onchain['mvrv']:.2f} (BGeometrics)")
+        else:
+            onchain = await M.safe(M.coinmetrics_btc(session), "Coin Metrics", errors)
     return A.analyze_btc(daily, weekly or [], price, onchain, derivs, oi_hist, fng, glob, srcs or ["ostatnie zamknięcie Coinbase"])
 
 
-def ai_payload(sonic, btc):
-    """Zwięzłe dane dla modelu AI (bez długich serii)."""
-    s = {k: v for k, v in sonic.items() if k not in ("chart", "swings_chart")}
-    s["setups"] = {side: {k: v for k, v in st.items() if k not in ("recent_trades",)} for side, st in sonic["setups"].items()}
-    s["turning"] = {k: v for k, v in sonic["turning"].items() if k not in ("bottom_labels", "top_labels")}
-    b = {k: v for k, v in btc.items() if k not in ("chart", "sma200_series")} if btc else None
-    return dict(sonic=s, btc=b, historia_sonic=dict(
-        wnioski=H.CONCLUSIONS, elliott=H.ELLIOTT_INTERPRETATION, fibo_statystyki=H.FIB_STATS,
-        swingi_glowne=H.SWINGS["glowny"][-14:], konsolidacje_ostatnie=H.RANGES[-6:],
-        badanie_setupow=H.SETUP_RESEARCH))
+def _r(x, n=4):
+    """Zaokrąglenie do n cyfr znaczących (krótsze dane = mniej tokenów)."""
+    if isinstance(x, float):
+        return float(f"{x:.{n}g}")
+    if isinstance(x, dict):
+        return {k: _r(v, n) for k, v in x.items() if v is not None}
+    if isinstance(x, list):
+        return [_r(v, n) for v in x]
+    return x
 
 
-def _round(o):
-    if isinstance(o, float):
-        return float(f"{o:.6g}")
-    if isinstance(o, dict):
-        return {k: _round(v) for k, v in o.items()}
-    if isinstance(o, list):
-        return [_round(v) for v in o]
-    return o
+def ai_btc_data(btc):
+    oc = btc.get("onchain") or {}
+    fr = [d["funding_8h_pct"] for d in btc["derivatives"] if d.get("funding_8h_pct") is not None]
+    return _r(dict(
+        cena=btc["price"], zmiana_7d_pct=btc["change_7d_pct"], zmiana_30d_pct=btc["change_30d_pct"],
+        vs_sma50_pct=A.pct(btc["price"], btc["sma50"]), vs_sma200_pct=A.pct(btc["price"], btc["sma200"]),
+        vs_sma200tyg_pct=A.pct(btc["price"], btc["sma200w"]), mayer=btc["mayer"], rsi_d=btc["rsi"], rsi_tyg=btc["rsi_w"],
+        macd_hist=btc["macd_hist"], realized_price=oc.get("realized_price"), mvrv=oc.get("mvrv"),
+        open_interest_usd=sum(d.get("oi_usd") or 0 for d in btc["derivatives"]) or None, oi_zmiana_7d_pct=btc.get("oi_7d_change_pct"),
+        funding_8h_pct=(sum(fr) / len(fr)) if fr else None,
+        strach_chciwosc=(btc.get("fng") or {}).get("value"), dominacja_btc_pct=(btc.get("global_") or {}).get("btc_dominance"),
+        ocena_tla_dla_altcoinow=btc["context_label"]))
+
+
+def ai_sonic_data(s):
+    lv, ob, tp = s["levels"], s.get("orderbook") or {}, s["turning"]
+    lvl = lambda l: dict(cena=l["price"], odl_pct=l["dist_pct"], zrodla=l["sources"][:2])
+    setups = {}
+    for side, st in s["setups"].items():
+        L = st.get("levels") or {}
+        setups[side] = dict(aktywny=st["triggered"], warunki=st["conditions"], strefa=[L.get("zone_low"), L.get("zone_high")],
+                            uniewaznienie=L.get("invalidation"), cel=L.get("target"), odl_do_strefy_pct=st.get("dist_to_zone_pct"),
+                            historia=dict(n=st["backtest"].get("n"), trafnosc_pct=st["backtest"].get("win_rate"),
+                                          sredni_R=st["backtest"].get("avg_R")))
+    cg = s.get("coingecko") or {}
+    h = s["history"]
+    return _r(dict(
+        cena=s["price"], swieca=s["candle_date"], zmiana_7d_pct=s["change_7d_pct"], zmiana_30d_pct=s["change_30d_pct"],
+        zmiana_90d_pct=s["change_90d_pct"], od_ATH_pct=h["from_ath_pct"], ATH=h["ath"], razy_od_ATL=h["from_atl_x"],
+        pozycja_w_zakresie_12m_pct=h["year_position_pct"], kierunek=s["direction"] and {k: v for k, v in s["direction"].items() if k != "short_term_detail"},
+        struktura={d: dict(trend=v["trend"], ostatnie=[f"{x['label']} {x['price']:.4g} {x['date']}" for x in v["swings"][-3:]])
+                   for d, v in s["structure"].items()},
+        fibo=[dict(ruch=f"{f['start']:.4g}->{f['end']:.4g} ({f['start_date']}–{f['end_date']})", zniesione_pct=f["current_retrace_pct"],
+                   poziomy={str(k): v for k, v in f["levels"].items() if k in (0.382, 0.5, 0.618, 0.786)}) for f in s["fibs"][:2]],
+        wsparcia=[lvl(l) for l in lv["supports"][:3]], opory=[lvl(l) for l in lv["resistances"][:3]],
+        wskazniki={k: s["indicators"][k] for k in ("rsi", "rsi_w", "macd_hist", "dist_sma50_pct", "dist_sma200_pct", "pctb", "atr_pct")},
+        podobienstwo_do_dolka=f"{tp['bottom_score']}/7", podobienstwo_do_szczytu=f"{tp['top_score']}/7",
+        ksiega_coinbase=dict(popyt_5pct_usd=ob.get("bid_depth_5pct_usd"), podaz_5pct_usd=ob.get("ask_depth_5pct_usd"),
+                             przewaga_kupna_pct=ob.get("imbalance_5pct"),
+                             sciana_kupna=(ob.get("bid_walls") or [{}])[0].get("price"), sciana_sprzedazy=(ob.get("ask_walls") or [{}])[0].get("price"))
+        if ob else None,
+        coingecko=dict(ranking=cg.get("rank"), sentyment_pozytywny_pct=cg.get("sentiment_up_pct"),
+                       gieldy=[f"{e['exchange']} {e['share_pct']:.0f}%" for e in (cg.get("exchanges_volume") or [])[:3]]) if cg else None,
+        setupy=setups,
+        wnioski_z_historii=H.CONCLUSIONS[1:3] + H.CONCLUSIONS[7:9],
+        elliott_obecnie=H.ELLIOTT_INTERPRETATION[-1]["opis"]))
 
 
 # ----------------------------------------------------------------- główna pętla
@@ -335,7 +377,7 @@ async def main():
             date_pl = now.strftime("%d.%m.%Y, %H:%M UTC")
             macro = await asyncio.to_thread(AI.research_macro, date_pl)
             senti = await asyncio.to_thread(AI.research_sonic_sentiment, date_pl)
-            comment = await asyncio.to_thread(AI.commentary, _round(ai_payload(sonic, btc)), macro, senti)
+            comment = await asyncio.to_thread(AI.commentary, ai_btc_data(btc), ai_sonic_data(sonic), macro, senti)
             ctx = dict(sonic=sonic, btc=btc, ai=comment, research_macro=macro, research_sonic=senti,
                        model=AI.GROQ_MODEL, generated_at=date_pl, errors=errors,
                        elliott=H.ELLIOTT_INTERPRETATION, conclusions=H.CONCLUSIONS)
