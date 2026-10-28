@@ -296,7 +296,6 @@ DANE WEJŚCIOWE DO ANALIZY:
         )
         raw_content = response.choices[0].message.content.strip()
         
-        # Inteligentne wycinanie bloku JSON za pomocą wyrażenia regularnego
         json_match = re.search(r'(\{[\s\S]*\})', raw_content)
         if json_match:
             json_str = json_match.group(1)
@@ -376,7 +375,7 @@ async def main():
     
     async with aiohttp.ClientSession() as session:
         sonic_metrics = await fetch_and_analyze_sonic(session)
-        btc_metrics =- await fetch_multi_exchange_btc(session)
+        btc_metrics = await fetch_multi_exchange_btc(session)
         
         is_in_zone, main_msg, macro_msg, html_content = generate_reports_and_decide(sonic_metrics, btc_metrics)
         
