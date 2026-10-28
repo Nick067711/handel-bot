@@ -240,11 +240,11 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 5. INTELIGENTNY ANALITYK AI Z INTELIGENTNYM WYCINANIEM JSON ---
-def generate_reports_and_decide(sonic_metrics, btc_metrics):
+# --- 5. INTELIGENTNY ANALITYK AI (BEZPOŚREDNI STRUMIEŃ HTML) ---
+def generate_html_report(sonic_metrics, btc_metrics):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY")
-        return False, None, None, None
+        return None
 
     client = OpenAI(
         base_url="https://api.groq.com/openai/v1",
@@ -254,16 +254,9 @@ def generate_reports_and_decide(sonic_metrics, btc_metrics):
     current_date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y, %H:%M UTC")
 
     prompt = f"""
-Jesteś głównym, wybitnym analitykiem rynkowym i kwantytatywnym. Przygotuj niezwykle dogłębny, profesjonalny, rozbudowany i merytorycznie bogaty raport rynkowy dla Bitcoina oraz Sonica.
-Twoja odpowiedź musi być PRAWIDŁOWYM OBIEKTEM JSON. Nie dodawaj żadnego tekstu przed ani po obiekcie JSON.
+Jesteś głównym, wybitnym analitykiem rynkowym i kwantytatywnym. Przygotuj niezwykle dogłębny, profesjonalny, rozbudowany i merytorycznie bogaty raport rynkowy dla Bitcoina oraz Sonica w formie kompletnego kodu HTML (od <!DOCTYPE html> do </html>).
 
-Struktura JSON:
-{{
-  "is_in_buy_or_sell_zone": false,
-  "telegram_msg_main": null,
-  "telegram_msg_macro": null,
-  "html_content": "<!DOCTYPE html><html lang='pl'><head><meta charset='UTF-8'><title>Raport Rynkowy</title>...</head><body>...</body></html>"
-}}
+Zwróć WYŁĄCZNIE czysty kod HTML. Nie owijaj go w żaden JSON ani w znaczniki markdown typu ```html.
 
 WYMOGI DOTYCZĄCE PLIKU HTML:
 1. **Data na samej górze**: Na samej górze raportu (w nagłówku głównym lub podtytule) MUSI wyraźnie widnieć aktualna data i czas raportu: "{current_date_str}".
@@ -289,27 +282,26 @@ DANE WEJŚCIOWE DO ANALIZY:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś wybitnym analitykiem finansowym zwracającym wyłącznie poprawny obiekt JSON po polsku."},
+                {"role": "system", "content": "Jesteś wybitnym analitykiem finansowym zwracającym wyłącznie czysty kod HTML w języku polskim."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
         )
-        raw_content = response.choices[0].message.content.strip()
+        html_content = response.choices[0].message.content.strip()
         
-        json_match = re.search(r'(\{[\s\S]*\})', raw_content)
-        if json_match:
-            json_str = json_match.group(1)
-            try:
-                data = json.loads(json_str)
-                return data.get("is_in_buy_or_sell_zone", False), data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
-            except Exception as je:
-                print(f"Błąd parsowania wyciętego JSON-a: {je}")
-
-        raise ValueError("Nie znaleziono poprawnego obiektu JSON w odpowiedzi modelu.")
-
+        # Oczyszczenie z ewentualnych znaczników ```html ... ```
+        if html_content.startswith("```"):
+            lines = html_content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            html_content = "\n".join(lines).strip()
+            
+        return html_content
     except Exception as e:
-        print(f"Błąd zapytania lub parsowania z AI: {e}")
-        fallback_html = f"""<!DOCTYPE html>
+        print(f"Błąd zapytania do AI: {e}")
+        return f"""<!DOCTYPE html>
 <html lang="pl">
 <head><meta charset="UTF-8"><title>Raport Rynkowy Sonic & BTC</title>
 <style>body{{background:#0d1117;color:#c9d1d9;font-family:sans-serif;max-width:1100px;margin:40px auto;padding:40px;}}</style>
@@ -317,12 +309,11 @@ DANE WEJŚCIOWE DO ANALIZY:
 <body>
 <h1>Raport Rynkowy Sonic & BTC</h1>
 <p><strong>Data raportu:</strong> {current_date_str}</p>
-<p>Trwa aktualizowanie pełnej analizy kwantytatywnej przez model AI w kolejnym cyklu.</p>
+<p>Błąd generowania raportu przez model AI w tym cyklu.</p>
 </body></html>"""
-        return False, None, None, fallback_html
 
 
-# --- 6. FTP & TELEGRAM ---
+# --- 6. FTP ---
 def upload_to_ftp(html_content):
     if not all([FTP_HOST, FTP_USER, FTP_PASS]) or not html_content:
         return False
@@ -353,19 +344,6 @@ def upload_to_ftp(html_content):
         print(f"Błąd FTP: {e}")
         return False
 
-def send_telegram_message(text):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID or not text:
-        return
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"}
-    data = urllib.parse.urlencode(payload).encode("utf-8")
-    req = urllib.request.Request(url, data=data, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=10) as response:
-            pass
-    except Exception as e:
-        print(f"Błąd wysyłki Telegram: {e}")
-
 
 # --- 7. GŁÓWNA PĘTLA ---
 async def main():
@@ -377,19 +355,11 @@ async def main():
         sonic_metrics = await fetch_and_analyze_sonic(session)
         btc_metrics = await fetch_multi_exchange_btc(session)
         
-        is_in_zone, main_msg, macro_msg, html_content = generate_reports_and_decide(sonic_metrics, btc_metrics)
+        html_content = generate_html_report(sonic_metrics, btc_metrics)
         
         if html_content:
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
-        
-        if is_in_zone and main_msg:
-            send_telegram_message(main_msg)
-            print("Wysłano powiadomienie strefowe na Telegram!")
-            
-        if macro_msg:
-            await asyncio.sleep(1)
-            send_telegram_message(macro_msg)
             
         save_state(state)
 
