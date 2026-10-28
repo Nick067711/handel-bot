@@ -133,13 +133,31 @@ class TradeEngine:
         }
 
 
-# --- 2. POBIERANIE DANYCH SONIC ---
+# --- 2. POBIERANIE CENA LIVE + ŚWIECE DLA SONIC ---
 async def fetch_and_analyze_sonic(session):
-    url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
+    ticker_url = "https://api.exchange.coinbase.com/products/S-USD/ticker"
+    candles_url = "https://api.exchange.coinbase.com/products/S-USD/candles?granularity=86400"
     headers = {"User-Agent": "Mozilla/5.0"}
+    
+    current_close = 0.0
+    current_vol = 1500000.0
     closes, highs, lows, volumes = [], [], [], []
+
+    # Pobierz aktualną cenę live spot bezpośrednio z tickera Coinbase
     try:
-        async with session.get(url, headers=headers, timeout=8) as resp:
+        async with session.get(ticker_url, headers=headers, timeout=5) as resp:
+            if resp.status == 200:
+                t_data = await resp.json()
+                if "price" in t_data:
+                    current_close = float(t_data["price"])
+                if "volume" in t_data:
+                    current_vol = float(t_data["volume"])
+    except Exception as e:
+        print(f"Błąd live tickera Coinbase Sonic: {e}")
+
+    # Pobierz świece historyczne wyłącznie do wskaźników (RSI / MACD)
+    try:
+        async with session.get(candles_url, headers=headers, timeout=8) as resp:
             if resp.status == 200:
                 data = await resp.json()
                 if isinstance(data, list) and len(data) > 0:
@@ -147,8 +165,10 @@ async def fetch_and_analyze_sonic(session):
                     volumes = [float(c[5]) for c in data[::-1]]
                     highs = [float(c[2]) for c in data[::-1]]
                     lows = [float(c[1]) for c in data[::-1]]
+                    if current_close == 0.0:
+                        current_close = closes[-1]
     except Exception as e:
-        print(f"Błąd Coinbase Sonic: {e}")
+        print(f"Błąd świec Coinbase Sonic: {e}")
 
     file_path = "SONIC_FTM_S_1d.csv"
     if os.path.exists(file_path) and not closes:
@@ -160,12 +180,18 @@ async def fetch_and_analyze_sonic(session):
                     highs.append(float(row["high"]))
                     lows.append(float(row["low"]))
                     volumes.append(float(row["volume"]))
+            if current_close == 0.0:
+                current_close = closes[-1]
+            current_vol = volumes[-1]
         except Exception as e:
             print(f"Błąd odczytu CSV Sonic: {e}")
 
-    current_close = closes[-1] if closes else 0.04788
-    current_vol = volumes[-1] if volumes else 1500000.0
-    
+    if current_close == 0.0:
+        current_close = 0.04788
+
+    if not closes:
+        closes = [current_close] * 30
+
     short_anchor = HISTORICAL_STRUCTURE_MATRIX["current_consolidation_matrix"]["virtual_short_anchor"]
     pct_from_short = round(((short_anchor - current_close) / short_anchor) * 100, 2)
     diff_from_short = round(short_anchor - current_close, 4)
@@ -181,44 +207,65 @@ async def fetch_and_analyze_sonic(session):
     }
 
 
-# --- 3. POBIERANIE DANYCH BITCOIN ---
+# --- 3. POBIERANIE CENA LIVE SPOT DLA BITCOINA Z GIEŁD ---
 async def fetch_multi_exchange_btc(session):
-    exchanges = [
-        ("Binance", "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=100"),
-        ("OKX", "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=1D&limit=100"),
-        ("Bybit", "https://api.bybit.com/v5/market/kline?category=linear&symbol=BTCUSDT&interval=D&limit=100")
-    ]
-    
-    closes_pool, volumes_pool = [], []
-    for name, url in exchanges:
-        try:
-            async with session.get(url, timeout=5) as resp:
-                if resp.status == 200:
-                    res = await resp.json()
-                    data = res.get("data", res.get("result", {}).get("list", res))
-                    if isinstance(data, list):
-                        for row in data:
-                            closes_pool.append(float(row[4]))
-                            volumes_pool.append(float(row[5]))
-        except Exception:
-            pass
-            
-    if not closes_pool:
-        closes_pool = [65000.0] * 30
-        volumes_pool = [50000.0] * 30
+    live_prices = []
+    volumes = []
+    closes_pool = []
 
-    avg_close = float(np.mean(closes_pool[-30:]) if len(closes_pool) >= 30 else closes_pool[-1])
-    total_vol = float(np.mean(volumes_pool[-30:]) if len(volumes_pool) >= 30 else 50000)
+    # 1. Binance Live Price & Klines
+    try:
+        async with session.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                if "price" in res:
+                    live_prices.append(float(res["price"]))
+        
+        async with session.get("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=50", timeout=5) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                if isinstance(data, list) and len(data) > 0:
+                    volumes.append(float(data[-1][5]))
+                    closes_pool = [float(c[4]) for c in data]
+    except Exception as e:
+        print(f"Binance live error: {e}")
+
+    # 2. OKX Live Ticker & Klines
+    try:
+        async with session.get("https://www.okx.com/api/v5/market/ticker?instId=BTC-USDT", timeout=5) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                data = res.get("data", [])
+                if isinstance(data, list) and len(data) > 0 and "last" in data[0]:
+                    live_prices.append(float(data[0]["last"]))
+        
+        async with session.get("https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=1D&limit=50", timeout=5) as resp:
+            if resp.status == 200:
+                res = await resp.json()
+                data = res.get("data", [])
+                if isinstance(data, list) and len(data) > 0:
+                    volumes.append(float(data[0][5]))
+                    if not closes_pool:
+                        closes_pool = [float(c[4]) for c in data[::-1]]
+    except Exception as e:
+        print(f"OKX live error: {e}")
+
+    # Aktualna cena live to bezpośrednia średnia cen z aktywnych giełd (lub ostatnia znana)
+    current_price = float(np.mean(live_prices)) if live_prices else (closes_pool[-1] if closes_pool else 95000.0)
+    total_vol = float(np.sum(volumes)) if volumes else 50000.0
     
+    if not closes_pool:
+        closes_pool = [current_price] * 30
+
     rsi = TradeEngine.calculate_rsi(closes_pool)
     macd = TradeEngine.calculate_macd(closes_pool)
 
     return {
-        "close": round(avg_close, 2),
+        "close": round(current_price, 2),
         "volume": round(total_vol, 2),
         "rsi": rsi,
         "macd_hist": macd["hist"],
-        "realized_price_proxy": round(avg_close * 0.92, 2)
+        "realized_price_proxy": round(current_price * 0.92, 2)
     }
 
 
@@ -261,19 +308,19 @@ Zwróć WYŁĄCZNIE czysty kod HTML. Nie owijaj go w żaden JSON ani w znaczniki
 WYMOGI DOTYCZĄCE PLIKU HTML:
 1. **Data na samej górze**: Na samej górze raportu (w nagłówku głównym lub podtytule) MUSI wyraźnie widnieć aktualna data i czas raportu: "{current_date_str}".
 2. **Układ i Stylistyka**: Ciemny motyw (Dark Theme), szerokie marginesy boczne (max-width: 1100px, margin: 40px auto), duży odstęp od góry (padding-top: 40px), nowoczesne karty (cards), elegancka typografia, odpowiednia interlinia i paddingi. Zero "biednych" sekcji – treść musi być wyczerpująca i profesjonalna.
-3. **Sekcja Makroekonomiczna Bitcoina (BTC)**: Szczegółowa analiza kondycji lidera rynku (cena ${btc_metrics.get('close')} USD, wolumen wielogiełdowy w USD, RSI {btc_metrics.get('rsi')}, MACD hist {btc_metrics.get('macd_hist')}, szacowany Realized Price Proxy). Omówienie wpływu sytuacji makro (FED/FOMC) na obecną hossę.
+3. **Sekcja Makroekonomiczna Bitcoina (BTC)**: Szczegółowa analiza kondycji lidera rynku (aktualna cena SPOT LIVE: ${btc_metrics.get('close')} USD, wolumen w USD, RSI {btc_metrics.get('rsi')}, MACD hist {btc_metrics.get('macd_hist')}, szacowany Realized Price Proxy). Omówienie wpływu sytuacji makro (FED/FOMC) na trwającą hossę.
 4. **Sekcja Analityczna Sonica (S)**: Wysoce profesjonalna, długa i szczegółowa analiza strukturalna:
    - Twarde dane historyczne: Absolutny dołek $0.00170 USD oraz ATH $3.48420 USD (bez wzmianek o pandemii).
    - Analiza falowa i Fibo: Szczegółowe omówienie kluczowych ruchów, w tym impulsu ze stycznia 2021 r. do $0.26 i modelowej korekty do $0.09666 (-62.82%), oraz sekwencji struktur HH/HL/LH/LL z lat 2023-2026.
-   - Aktualna pozycja ceny (${sonic_metrics.get('close')} USD), odległość od kluczowego wsparcia bazy ($0.045 - $0.054 USD) oraz oporu / Short Anchora ($0.070 USD).
+   - Aktualna pozycja ceny SPOT LIVE (${sonic_metrics.get('close')} USD), odległość od kluczowego wsparcia bazy ($0.045 - $0.054 USD) oraz oporu / Short Anchora ($0.070 USD).
    - Precyzyjne określenie obecnej fazy rynkowej w trwającej hossie (budowanie bazy, dynamika ruchu ceny i nastroje inwestorów wobec ekosystemu Sonic).
 5. **Wolumen i Waluta**: Przy każdym wolumenie wyraźnie wskazana giełda (Coinbase dla Sonica, Agregat dla BTC) oraz waluta USD.
 6. **Podpis AI**: Na samym dole stopka z oficjalnym podpisem: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
 
 DANE WEJŚCIOWE DO ANALIZY:
 - Aktualna Data Raportu: {current_date_str}
-- BTC: ${btc_metrics.get('close')} USD, Wolumen: {btc_metrics.get('volume')} USD, RSI: {btc_metrics.get('rsi')}, MACD Hist: {btc_metrics.get('macd_hist')}.
-- SONIC: ${sonic_metrics.get('close')} USD, Wolumen: {sonic_metrics.get('volume')} (Coinbase, USD), RSI: {sonic_metrics.get('rsi')}, MACD: {sonic_metrics.get('macd')}.
+- BTC (Aktualna Cena Spot Live): ${btc_metrics.get('close')} USD, Wolumen: {btc_metrics.get('volume')} USD, RSI: {btc_metrics.get('rsi')}, MACD Hist: {btc_metrics.get('macd_hist')}.
+- SONIC (Aktualna Cena Spot Live): ${sonic_metrics.get('close')} USD, Wolumen: {sonic_metrics.get('volume')} (Coinbase, USD), RSI: {sonic_metrics.get('rsi')}, MACD: {sonic_metrics.get('macd')}.
 - Odległość od Short Anchor ($0.070 USD): -{sonic_metrics.get('pct_from_short')}% (-{sonic_metrics.get('diff_from_short_usd')} USD).
 - Pełna macierz historyczna CSV: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
 """
@@ -289,7 +336,6 @@ DANE WEJŚCIOWE DO ANALIZY:
         )
         html_content = response.choices[0].message.content.strip()
         
-        # Oczyszczenie z ewentualnych znaczników ```html ... ```
         if html_content.startswith("```"):
             lines = html_content.splitlines()
             if lines[0].startswith("```"):
@@ -347,7 +393,7 @@ def upload_to_ftp(html_content):
 
 # --- 7. GŁÓWNA PĘTLA ---
 async def main():
-    print("Uruchamianie bota: pełna analiza CSV + kontekst BTC + pogłębiony model AI...")
+    print("Uruchamianie bota: pobieranie live spot cen z giełd + pogłębiony model AI...")
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
