@@ -239,7 +239,7 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 5. INTELIGENTNY ANALITYK AI (GROQ GPT-OSS-120B) ---
+# --- 5. INTELIGENTNY ANALITYK AI (Z WYMOGIEM BOGATEJ NARRACJI I DATY) ---
 def generate_reports_and_decide(sonic_metrics, btc_metrics):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY")
@@ -250,48 +250,61 @@ def generate_reports_and_decide(sonic_metrics, btc_metrics):
         api_key=GROQ_API_KEY
     )
 
+    current_date_str = datetime.now(timezone.utc).strftime("%d.%m.%Y, %H:%M UTC")
+
     prompt = f"""
-Jesteś głównym analitykiem rynkowym. Przeanalizuj poniższe dane strukturalne z plików CSV oraz wskaźniki techniczne.
+Jesteś głównym, wybitnym analitykiem rynkowym i kwantytatywnym. Przygotuj niezwykle dogłębny, profesjonalny, rozbudowany i merytorycznie bogaty raport rynkowy dla Bitcoina oraz Sonica.
+ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W CZYSTYM OBIEKCIE JSON (bez znaczników markdown typu ```json, sam surowy JSON) W CAŁOŚCI PO POLSKU.
 
-WYMOGI HTML:
-1. Układ i Stylistyka: Strona w ciemnym motywie (Dark Theme). Szerokie marginesy boczne (max-width: 1000px, margin: 40px auto) oraz duży odstęp od góry (padding-top: 40px).
-2. BITCOIN (BTC): Szczegółowa sekcja analityczna (cena ${btc_metrics.get('close')} USD, wolumen w USD, RSI {btc_metrics.get('rsi')}, MACD, Realized Proxy, kontekst makro).
-3. SONIC (S): Bogata sekcja analityczna.
-   - Opisz absolutny dołek historyczny ($0.00170 USD) i ATH ($3.48420 USD) bez żadnych wzmianek o pandemii czy COVID.
-   - Omów kluczowe impulsy i zniesienia Fibo (np. impuls $0.26 z 2021 r. i korektę do $0.09666 rzędu -62.82%, a także strukturę HH/HL/LH/LL z lat 2023-2026).
-   - Przedstaw obecne położenie ceny (${sonic_metrics.get('close')} USD), odległość do strefy bazy ($0.045 - $0.054 USD) oraz oporu Short Anchor ($0.070 USD).
-   - Określ dokładnie fazę: czy jesteśmy w fazie domykania shorta i otwarcia longa, czy w konsolidacji (ze wskazaniem, czy cena koryguje od górki do dołka, czy odbija od dołka do górki).
-   - Opisz aktualne nastroje inwestorów wokół projektu Sonic.
-4. Wolumen i Waluta: Wolumeny muszą być podane z jasnym wskazaniem giełdy (Coinbase dla Sonica, Agregat dla BTC) i w walucie USD.
-5. Podpis: Na samym dole oficjalny podpis: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
+Struktura JSON musi zawierać dokładnie te klucze:
+- "is_in_buy_or_sell_zone": boolean (true / false)
+- "telegram_msg_main": string lub null
+- "telegram_msg_macro": string lub null
+- "html_content": string (kompletny, bardzo bogaty i wyczerpujący kod HTML)
 
-DANE WEJŚCIOWE:
-- BTC: ${btc_metrics.get('close')} USD, RSI: {btc_metrics.get('rsi')}, MACD Hist: {btc_metrics.get('macd_hist')}.
+WYMOGI DOTYCZĄCE PLIKU HTML:
+1. **Data na samej górze**: Na samej górze raportu (w nagłówku głównym lub podtytule) MUSI wyraźnie widnieć aktualna data i czas raportu: "{current_date_str}".
+2. **Układ i Stylistyka**: Ciemny motyw (Dark Theme), szerokie marginesy boczne (max-width: 1100px, margin: 40px auto), duży odstęp od góry (padding-top: 40px), nowoczesne karty (cards), elegancka typografia, odpowiedni interlinia i paddingi. Zero "biednych" sekcji – treść musi być wyczerpująca.
+3. **Sekcja Makroekonomiczna Bitcoina (BTC)**: Szczegółowa analiza kondycji lidera rynku (cena ${btc_metrics.get('close')} USD, wolumen wielogiełdowy w USD, RSI {btc_metrics.get('rsi')}, MACD hist {btc_metrics.get('macd_hist')}, szacowany Realized Price Proxy). Omówienie wpływu sytuacji makro (FED/FOMC) na obecną hossę.
+4. **Sekcja Analityczna Sonica (S)**: Wysoce profesjonalna, długa i szczegółowa analiza strukturalna:
+   - Twarde dane historyczne: Absolutny dołek $0.00170 USD oraz ATH $3.48420 USD (bez wzmianek o pandemii).
+   - Analiza falowa i Fibo: Szczegółowe omówienie kluczowych ruchów, w tym impulsu ze stycznia 2021 r. do $0.26 i modelowej korekty do $0.09666 (-62.82%), oraz sekwencji struktur HH/HL/LH/LL z lat 2023-2026.
+   - Aktualna pozycja ceny (${sonic_metrics.get('close')} USD), odległość od kluczowego wsparcia bazy ($0.045 - $0.054 USD) oraz oporu / Short Anchora ($0.070 USD).
+   - Precyzyjne określenie obecnej fazy rynkowej (np. faza budowania silnej bazy akumulacyjnej w trwającej hossie, dynamika ruchu ceny i nastroje inwestorów wobec ekosystemu Sonic).
+5. **Wolumen i Waluta**: Przy każdym wolumenie wyraźnie wskazana giełda (Coinbase dla Sonica, Agregat dla BTC) oraz waluta USD.
+6. **Podpis AI**: Na samym dole stopka z oficjalnym podpisem: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
+
+DANE WEJŚCIOWE DO ANALIZY:
+- Aktualna Data Raportu: {current_date_str}
+- BTC: ${btc_metrics.get('close')} USD, Wolumen: {btc_metrics.get('volume')} USD, RSI: {btc_metrics.get('rsi')}, MACD Hist: {btc_metrics.get('macd_hist')}.
 - SONIC: ${sonic_metrics.get('close')} USD, Wolumen: {sonic_metrics.get('volume')} (Coinbase, USD), RSI: {sonic_metrics.get('rsi')}, MACD: {sonic_metrics.get('macd')}.
 - Odległość od Short Anchor ($0.070 USD): -{sonic_metrics.get('pct_from_short')}% (-{sonic_metrics.get('diff_from_short_usd')} USD).
 - Pełna macierz historyczna CSV: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
-
-ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON (W CAŁOŚCI PO POLSKU):
-- "is_in_buy_or_sell_zone": (true / false) — Czy cena znajduje się obecnie w widełkach strefy zakupu (LONG) lub sprzedaży (SHORT)?
-- "telegram_msg_main": (Tylko jeśli is_in_buy_or_sell_zone == true, inaczej null) Wiadomość na Telegram po polsku.
-- "telegram_msg_macro": (Tylko w przypadku skrajnych warunków makro, inaczej null).
-- "html_content": Kompletny, profesjonalny kod HTML spełniający wszystkie powyższe kryteria.
 """
 
     try:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś ekspertem analitycznym tworzącym kompletne raporty HTML i powiadomienia wyłącznie po polsku."},
+                {"role": "system", "content": "Jesteś wybitnym analitykiem finansowym tworzącym profesjonalne, niezwykle bogate raporty HTML i powiadomienia wyłącznie w formacie czystego JSON i w całości po polsku."},
                 {"role": "user", "content": prompt}
             ],
-            response_format={"type": "json_object"},
-            temperature=0.2
+            temperature=0.3
         )
-        data = json.loads(response.choices[0].message.content)
+        raw_content = response.choices[0].message.content.strip()
+        
+        if raw_content.startswith("```"):
+            lines = raw_content.splitlines()
+            if lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].startswith("```"):
+                lines = lines[:-1]
+            raw_content = "\n".join(lines).strip()
+            
+        data = json.loads(raw_content)
         return data.get("is_in_buy_or_sell_zone", False), data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
     except Exception as e:
-        print(f"Błąd zapytania do AI: {e}")
+        print(f"Błąd zapytania lub parsowania JSON z AI: {e}")
         return False, None, None, None
 
 
@@ -320,7 +333,7 @@ def upload_to_ftp(html_content):
                 ftp.storbinary("STOR index.html", f)
                 
             os.remove(temp_filename)
-            print("Sukces! Raport HTML zaktualizowany na serwerze: https://piwecki.pl/analiza/")
+            print("Sukces! Rozbudowany raport HTML zaktualizowany na serwerze: https://piwecki.pl/analiza/")
             return True
     except Exception as e:
         print(f"Błąd FTP: {e}")
@@ -342,7 +355,7 @@ def send_telegram_message(text):
 
 # --- 7. GŁÓWNA PĘTLA ---
 async def main():
-    print("Uruchamianie bota: analiza historyczna CSV + kontekst BTC + AI Groq...")
+    print("Uruchamianie bota: pełna analiza CSV + kontekst BTC + pogłębiony model AI...")
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
@@ -356,7 +369,6 @@ async def main():
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        # Elastyczna wysyłka na Telegram za każdym razem, gdy cena wchodzi w widełki strefy
         if is_in_zone and main_msg:
             send_telegram_message(main_msg)
             print("Wysłano powiadomienie strefowe na Telegram!")
