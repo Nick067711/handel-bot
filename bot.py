@@ -22,15 +22,15 @@ FTP_DIR = os.getenv("FTP_DIR", "domains/piwecki.pl/public_html/analiza")
 
 STATE_FILE = "sonic_signal_state.json"
 
-# --- PEŁNA MACIERZ POZIOMÓW HISTORYCZNYCH I STRUKTURY Z PLIKÓW CSV ---
+# --- KOMPLEKSOWA MACIERZ HISTORYCZNA (W 100% ZACHOWANA Z PLIKÓW CSV) ---
 HISTORICAL_STRUCTURE_MATRIX = {
-    "LL_historical_standard": {"price": 0.0090, "date": "2019-11-25", "desc": "Najniższy poziom historyczny (z pominięciem anomalii COVID)"},
-    "HL_base_accumulation": {"price": 0.0450, "date": "Bieżąca baza", "desc": "Dolna granica obecnej strefy konsolidacji"},
+    "LL_historical_standard": {"price": 0.00542, "date": "2020-06-02", "desc": "Najniższy punkt historyczny"},
+    "HL_base_accumulation": {"price": 0.0450, "date": "Bieżąca baza", "desc": "Dolna granica strefy bazy/konsolidacji"},
     "HL_support_recent": {"price": 0.0540, "date": "Bieżąca baza", "desc": "Górna granica pasma bazy"},
-    "Virtual_Short_Anchor": {"price": 0.0700, "date": "Wrzesień/Październik 2026", "desc": "Wirtualny Short Anchor (szczyt lokalny)"},
-    "LH_resistance_2024_march": {"price": 1.2289, "date": "2024-03-22", "desc": "Kluczowy opor / szczyt z marca 2024"},
-    "HH_resistance_2024_december": {"price": 1.4782, "date": "2024-12-16", "desc": "Szczyt impulsowy z grudnia 2024"},
-    "ATH_historical": {"price": 3.4842, "date": "2021-10-28", "desc": "Maksimum makro hossy"}
+    "Virtual_Short_Anchor": {"price": 0.0700, "date": "Wrzesień/Październik 2026", "desc": "Wirtualny Short Anchor (punkt wyjścia)"},
+    "LH_resistance_2024_march": {"price": 1.2289, "date": "2024-03-22", "desc": "Kluczowy szczyt z marca 2024 r."},
+    "HH_resistance_2024_december": {"price": 1.4782, "date": "2024-12-16", "desc": "Szczyt impulsowy z grudnia 2024 r."},
+    "ATH_historical": {"price": 3.4842, "date": "2021-10-28", "desc": "Najwyższy punkt historyczny (ATH)"}
 }
 
 
@@ -184,7 +184,7 @@ def load_state():
                 return json.load(f)
         except Exception:
             pass
-    return {"last_type": "SHORT", "last_short_price": 0.070, "target_signal": "LONG", "last_html_date": ""}
+    return {"last_type": "SHORT", "last_short_price": 0.070, "target_signal": "LONG", "last_html_date": "", "signal_sent": False}
 
 def save_state(state):
     try:
@@ -216,25 +216,26 @@ def generate_reports_and_decide(sonic_metrics, btc_metrics, target_signal):
 
     prompt = f"""
 Jesteś najwyższej klasy analitykiem rynkowym (Model: Groq GPT-OSS-120b). Przeanalizuj poniższe dane i podejmij decyzję inwestycyjną.
-Strategia: Start od wirtualnego SHORT z poziomu $0.070. Szukamy zwrotu na LONG w strefie bazy.
+Strategia: Start od wirtualnego SHORT z poziomu $0.070. Szukamy zwrotu na LONG w strefie bazy ($0.045 - $0.054).
 
-ZASADY RAPORTU HTML:
-1. Marginesy i układ: Strona musi mieć szerokie marginesy boczne (np. max-width: 1000px, margin: 40px auto) oraz duży odstęp/oddech od góry. Czysty, nowoczesny Dark Theme, bardzo czytelna typografia.
-2. Kierunek analizy: Znajdujemy się w fazie korygowania spadkowego od Shorta $0.070 w stronę bazy. Wszelkie wskaźniki postępu i cele mają pokazywać dążenie ceny w dół do bazy wsparcia (np. $0.045 - $0.054), a NIE w górę do odległych oporów.
-3. Poziomy strukturalne: Wymień absolutny najniższy i najwyższy poziom historyczny (z datami, pomijając anomalię COVID) oraz najbliższe poziomy historyczne względem obecnej ceny.
-4. Wolumen i waluta: Przy wolumenach wyraźnie zaznacz giełdę (np. Coinbase / wielogiełdowy agregat) oraz dopisz, że wartości są w USD (dolarach amerykańskich).
-5. Podpis: Na samym dole strony umieść wyraźny podpis: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
+WYMAGANIA DOTYCZĄCE RAPORTU HTML:
+1. Układ i Marginesy: Strona musi mieć szerokie marginesy boczne, odpowiedni odstęp (oddech) od góry, profesjonalny i czytelny układ w Dark Theme.
+2. Analiza obu projektów: W raporcie MUSI być szczegółowo omówiona sytuacja na **Bitcoine (BTC)** jako głównym projekcie makro, a w dalszej kolejności na **Sonic (S)**. Żaden projekt nie może być pominięty.
+3. Poziomy strukturalne Sonica: Wymień absolutny najniższy punkt historyczny ($0.00542 z dnia 2020-06-02) oraz absolutny najwyższy punkt historyczny (ATH $3.4842 z dnia 2021-10-28) bez żadnych wzmianek o pandemii czy COVID. Poniżej wymień najbliższe poziomy historyczne względem obecnej ceny.
+4. Faza Rynkowa i Konsolidacja: W opisie sytuacji Sonica określ wyraźnie, czy znajdujemy się w fazie zamknięcia shorta i otwarcia longa, czy w fazie konsolidacji. Jeśli w konsolidacji, precyzyjnie wskaż jej etap (np. czy cena koryguje od górki do dołka, czy odbija od dołka do górki).
+5. Wolumen i Waluta: Przy wolumenach podaj giełdę (np. Coinbase / Agregat wielogiełdowy) oraz zaznacz, że wartości są w USD (dolarach amerykańskich).
+6. Podpis AI: Na samym dole strony umieść wyraźny podpis: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
 
 DANE WEJŚCIOWE:
-- BTC: ${btc_metrics.get('close')} USD, RSI {btc_rsi}, MACD Hist {btc_hist}, Status: {macro_status}.
-- SONIC: ${sonic_metrics.get('close')} USD, Wolumen: {sonic_metrics.get('volume')} (Coinbase, w USD), RSI {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}.
+- BITCOIN (BTC) [Wielogiełdowe]: Cena ${btc_metrics.get('close')} USD, Wolumen: {btc_metrics.get('volume')} (w USD), RSI {btc_rsi}, MACD Hist {btc_hist}, Realized Proxy ${btc_metrics.get('realized_price_proxy')} USD, Status Makro: {macro_status}.
+- SONIC (S) [Coinbase / CSV]: Cena ${sonic_metrics.get('close')} USD, Wolumen: {sonic_metrics.get('volume')} (Coinbase, w USD), RSI {sonic_metrics.get('rsi')}, MACD {sonic_metrics.get('macd')}.
 - Odległość od Shorta $0.070: -{sonic_metrics.get('pct_to_short_anchor')}% (-{sonic_metrics.get('diff_to_short_anchor_usdc')} USD).
-- Macierz poziomów: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
+- Macierz historyczna Sonica: {json.dumps(sonic_metrics.get('structural_matrix'), indent=2)}
 
 ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON (W CAŁOŚCI PO POLSKU):
-- "is_signal_trigger": (true / false)
-- "telegram_msg_main": (Tylko jeśli is_signal_trigger==true, inaczej null) PO POLSKU.
-- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY / DNO BESSY, inaczej null) PO POLSKU.
+- "is_signal_trigger": (true / false) — Czy w oparciu o pełną analizę fal, Fibo, dywergencji oraz fakt, że cena dotarła do przedziału bazy ($0.045 - $0.054) po korekcie ze szczytu $0.070, następuje moment zwrotu na LONG (sygnał wysyłany na Telegram)?
+- "telegram_msg_main": (Tylko jeśli is_signal_trigger==true i sygnał nie był wcześniej wysłany, inaczej null) Alert na Telegram PO POLSKU.
+- "telegram_msg_macro": (Tylko jeśli macro_status to SZCZYT HOSSY / DNO BESSY, inaczej null) Alert makro PO POLSKU.
 - "html_content": Kompletny kod HTML spełniający powyższe kryteria wizualne i merytoryczne (W CAŁOŚCI PO POLSKU).
 """
 
@@ -242,7 +243,7 @@ ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W FORMATZE JSON (W CAŁOŚCI PO POLSKU):
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś ekspertem rynkowym generującym profesjonalny HTML i analizy wyłącznie po polsku."},
+                {"role": "system", "content": "Jesteś ekspertem rynkowym generującym profesjonalny HTML i analizy zawierające Bitcoin i Sonic, wyłącznie po polsku."},
                 {"role": "user", "content": prompt}
             ],
             response_format={"type": "json_object"},
@@ -310,7 +311,7 @@ def send_telegram_message(text):
 
 # --- 7. GŁÓWNA PĘTLA ---
 async def main():
-    print("Start monitora (Poprawiona estetyka HTML, poprawny kierunek celów w dół do bazy, podpis AI)...")
+    print("Start monitora (Analiza Bitcoin + Sonic, kontrola jednorazowego wysyłania sygnału, poprawny HTML)...")
     
     state = load_state()
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -321,6 +322,7 @@ async def main():
         btc_metrics = await fetch_multi_exchange_btc(session)
         
         target_signal = state.get("target_signal", "LONG")
+        signal_sent = state.get("signal_sent", False)
         
         is_trigger, main_msg, macro_msg, html_content = generate_reports_and_decide(
             sonic_metrics, btc_metrics, target_signal
@@ -330,18 +332,20 @@ async def main():
             if upload_to_ftp(html_content):
                 state["last_html_date"] = today_str
         
-        if is_trigger and main_msg:
+        # Wysyłka sygnału na Telegram TYLKO RAZ, gdy AI zatwierdzi trigger i nie był wcześniej wysłany
+        if is_trigger and main_msg and not signal_sent:
             send_telegram_message(main_msg)
+            state["signal_sent"] = True
             state["last_type"] = "LONG"
             state["target_signal"] = "SHORT"
-            print("Sygnał LONG wygenerowany przez AI! Wysłano na Telegram.")
+            print("Wysłano jednorazowy sygnał LONG na Telegram!")
         else:
-            print("Brak sygnału (oczekiwanie w strefie bazy od shorta $0.070) – zaktualizowano czytelny raport HTML.")
+            print("Sygnał nie został wyzwolony lub został już wcześniej wysłany – brak powiadomienia na Telegramie.")
             
         if macro_msg and ("SZCZYT HOSSY" in macro_msg or "DNO BESSY" in macro_msg):
             await asyncio.sleep(1.5)
             send_telegram_message(macro_msg)
-            print("Wysłano alert Makro BTC.")
+            print("Wysłano rzadki alert Makro BTC na Telegram.")
             
         save_state(state)
 
