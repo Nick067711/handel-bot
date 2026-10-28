@@ -6,6 +6,7 @@ import aiohttp
 import csv
 import urllib.request
 import urllib.parse
+import re
 import numpy as np
 from datetime import datetime, timezone
 from openai import OpenAI
@@ -239,7 +240,7 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 5. INTELIGENTNY ANALITYK AI (Z WYMOGIEM BOGATEJ NARRACJI I DATY) ---
+# --- 5. INTELIGENTNY ANALITYK AI Z ODPORNYM PARSEREM ---
 def generate_reports_and_decide(sonic_metrics, btc_metrics):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY")
@@ -301,11 +302,40 @@ DANE WEJŚCIOWE DO ANALIZY:
                 lines = lines[:-1]
             raw_content = "\n".join(lines).strip()
             
-        data = json.loads(raw_content)
+        # Próba standardowego parsowania JSON
+        try:
+            data = json.loads(raw_content)
+        except Exception as json_err:
+            print(f"Ostrzeżenie: Standardowy JSON nie powiódł się ({json_err}). Uruchacam parser awaryjny...")
+            # Awaryjne wyciąganie wartości kluczowych przez regex
+            is_zone_match = re.search(r'"is_in_buy_or_sell_zone"\s*:\s*(true|false)', raw_content, re.IGNORECASE)
+            is_zone = True if (is_zone_match and is_zone_match.group(1).lower() == 'true') else False
+            
+            main_msg_match = re.search(r'"telegram_msg_main"\s*:\s*("(?:[^"\\]|\\.)*")\s*,', raw_content)
+            main_msg = json.loads(main_msg_match.group(1)) if main_msg_match else None
+            
+            macro_msg_match = re.search(r'"telegram_msg_macro"\s*:\s*("(?:[^"\\]|\\.)*")\s*,', raw_content)
+            macro_msg = json.loads(macro_msg_match.group(1)) if macro_msg_match else None
+            
+            html_match = re.search(r'"html_content"\s*:\s*"([\s\S]*)"\s*\}\s*$', raw_content)
+            html_content = html_match.group(1).replace('\\"', '"').replace('\\n', '\n') if html_match else f"<html><body><h1>Raport Analityczny Sonic & BTC</h1><p>Data: {current_date_str}</p><p>Błąd parsowania pełnego HTML.</p></body></html>"
+            
+            return is_zone, main_msg, macro_msg, html_content
+
         return data.get("is_in_buy_or_sell_zone", False), data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
     except Exception as e:
-        print(f"Błąd zapytania lub parsowania JSON z AI: {e}")
-        return False, None, None, None
+        print(f"Błąd zapytania do AI: {e}")
+        fallback_html = f"""<!DOCTYPE html>
+<html lang="pl">
+<head><meta charset="UTF-8"><title>Raport Rynkowy Sonic & BTC</title>
+<style>body{{background:#0d1117;color:#c9d1d9;font-family:sans-serif;max-width:1100px;margin:40px auto;padding:40px;}}</style>
+</head>
+<body>
+<h1>Raport Rynkowy Sonic & BTC</h1>
+<p><strong>Data raportu:</strong> {current_date_str}</p>
+<p>Trwa aktualizowanie pełnej analizy kwantytatywnej przez model AI w kolejnym cyklu.</p>
+</body></html>"""
+        return False, None, None, fallback_html
 
 
 # --- 6. FTP & TELEGRAM ---
