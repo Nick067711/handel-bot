@@ -240,7 +240,7 @@ def save_state(state):
         print(f"Błąd zapisu stanu: {e}")
 
 
-# --- 5. INTELIGENTNY ANALITYK AI Z ODPORNYM PARSEREM ---
+# --- 5. INTELIGENTNY ANALITYK AI Z INTELIGENTNYM WYCINANIEM JSON ---
 def generate_reports_and_decide(sonic_metrics, btc_metrics):
     if not GROQ_API_KEY:
         print("Błąd: Brak klucza GROQ_API_KEY")
@@ -255,23 +255,25 @@ def generate_reports_and_decide(sonic_metrics, btc_metrics):
 
     prompt = f"""
 Jesteś głównym, wybitnym analitykiem rynkowym i kwantytatywnym. Przygotuj niezwykle dogłębny, profesjonalny, rozbudowany i merytorycznie bogaty raport rynkowy dla Bitcoina oraz Sonica.
-ZWRÓĆ ODPOWIEDŹ WYŁĄCZNIE W CZYSTYM OBIEKCIE JSON (bez znaczników markdown typu ```json, sam surowy JSON) W CAŁOŚCI PO POLSKU.
+Twoja odpowiedź musi być PRAWIDŁOWYM OBIEKTEM JSON. Nie dodawaj żadnego tekstu przed ani po obiekcie JSON.
 
-Struktura JSON musi zawierać dokładnie te klucze:
-- "is_in_buy_or_sell_zone": boolean (true / false)
-- "telegram_msg_main": string lub null
-- "telegram_msg_macro": string lub null
-- "html_content": string (kompletny, bardzo bogaty i wyczerpujący kod HTML)
+Struktura JSON:
+{{
+  "is_in_buy_or_sell_zone": false,
+  "telegram_msg_main": null,
+  "telegram_msg_macro": null,
+  "html_content": "<!DOCTYPE html><html lang='pl'><head><meta charset='UTF-8'><title>Raport Rynkowy</title>...</head><body>...</body></html>"
+}}
 
 WYMOGI DOTYCZĄCE PLIKU HTML:
 1. **Data na samej górze**: Na samej górze raportu (w nagłówku głównym lub podtytule) MUSI wyraźnie widnieć aktualna data i czas raportu: "{current_date_str}".
-2. **Układ i Stylistyka**: Ciemny motyw (Dark Theme), szerokie marginesy boczne (max-width: 1100px, margin: 40px auto), duży odstęp od góry (padding-top: 40px), nowoczesne karty (cards), elegancka typografia, odpowiedni interlinia i paddingi. Zero "biednych" sekcji – treść musi być wyczerpująca.
+2. **Układ i Stylistyka**: Ciemny motyw (Dark Theme), szerokie marginesy boczne (max-width: 1100px, margin: 40px auto), duży odstęp od góry (padding-top: 40px), nowoczesne karty (cards), elegancka typografia, odpowiednia interlinia i paddingi. Zero "biednych" sekcji – treść musi być wyczerpująca i profesjonalna.
 3. **Sekcja Makroekonomiczna Bitcoina (BTC)**: Szczegółowa analiza kondycji lidera rynku (cena ${btc_metrics.get('close')} USD, wolumen wielogiełdowy w USD, RSI {btc_metrics.get('rsi')}, MACD hist {btc_metrics.get('macd_hist')}, szacowany Realized Price Proxy). Omówienie wpływu sytuacji makro (FED/FOMC) na obecną hossę.
 4. **Sekcja Analityczna Sonica (S)**: Wysoce profesjonalna, długa i szczegółowa analiza strukturalna:
    - Twarde dane historyczne: Absolutny dołek $0.00170 USD oraz ATH $3.48420 USD (bez wzmianek o pandemii).
    - Analiza falowa i Fibo: Szczegółowe omówienie kluczowych ruchów, w tym impulsu ze stycznia 2021 r. do $0.26 i modelowej korekty do $0.09666 (-62.82%), oraz sekwencji struktur HH/HL/LH/LL z lat 2023-2026.
    - Aktualna pozycja ceny (${sonic_metrics.get('close')} USD), odległość od kluczowego wsparcia bazy ($0.045 - $0.054 USD) oraz oporu / Short Anchora ($0.070 USD).
-   - Precyzyjne określenie obecnej fazy rynkowej (np. faza budowania silnej bazy akumulacyjnej w trwającej hossie, dynamika ruchu ceny i nastroje inwestorów wobec ekosystemu Sonic).
+   - Precyzyjne określenie obecnej fazy rynkowej w trwającej hossie (budowanie bazy, dynamika ruchu ceny i nastroje inwestorów wobec ekosystemu Sonic).
 5. **Wolumen i Waluta**: Przy każdym wolumenie wyraźnie wskazana giełda (Coinbase dla Sonica, Agregat dla BTC) oraz waluta USD.
 6. **Podpis AI**: Na samym dole stopka z oficjalnym podpisem: "Raport wygenerowany autonomicznie przez model AI: Groq (GPT-OSS-120b)".
 
@@ -287,44 +289,27 @@ DANE WEJŚCIOWE DO ANALIZY:
         response = client.chat.completions.create(
             model="openai/gpt-oss-120b",
             messages=[
-                {"role": "system", "content": "Jesteś wybitnym analitykiem finansowym tworzącym profesjonalne, niezwykle bogate raporty HTML i powiadomienia wyłącznie w formacie czystego JSON i w całości po polsku."},
+                {"role": "system", "content": "Jesteś wybitnym analitykiem finansowym zwracającym wyłącznie poprawny obiekt JSON po polsku."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.3
         )
         raw_content = response.choices[0].message.content.strip()
         
-        if raw_content.startswith("```"):
-            lines = raw_content.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            raw_content = "\n".join(lines).strip()
-            
-        # Próba standardowego parsowania JSON
-        try:
-            data = json.loads(raw_content)
-        except Exception as json_err:
-            print(f"Ostrzeżenie: Standardowy JSON nie powiódł się ({json_err}). Uruchacam parser awaryjny...")
-            # Awaryjne wyciąganie wartości kluczowych przez regex
-            is_zone_match = re.search(r'"is_in_buy_or_sell_zone"\s*:\s*(true|false)', raw_content, re.IGNORECASE)
-            is_zone = True if (is_zone_match and is_zone_match.group(1).lower() == 'true') else False
-            
-            main_msg_match = re.search(r'"telegram_msg_main"\s*:\s*("(?:[^"\\]|\\.)*")\s*,', raw_content)
-            main_msg = json.loads(main_msg_match.group(1)) if main_msg_match else None
-            
-            macro_msg_match = re.search(r'"telegram_msg_macro"\s*:\s*("(?:[^"\\]|\\.)*")\s*,', raw_content)
-            macro_msg = json.loads(macro_msg_match.group(1)) if macro_msg_match else None
-            
-            html_match = re.search(r'"html_content"\s*:\s*"([\s\S]*)"\s*\}\s*$', raw_content)
-            html_content = html_match.group(1).replace('\\"', '"').replace('\\n', '\n') if html_match else f"<html><body><h1>Raport Analityczny Sonic & BTC</h1><p>Data: {current_date_str}</p><p>Błąd parsowania pełnego HTML.</p></body></html>"
-            
-            return is_zone, main_msg, macro_msg, html_content
+        # Inteligentne wycinanie bloku JSON za pomocą wyrażenia regularnego
+        json_match = re.search(r'(\{[\s\S]*\})', raw_content)
+        if json_match:
+            json_str = json_match.group(1)
+            try:
+                data = json.loads(json_str)
+                return data.get("is_in_buy_or_sell_zone", False), data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
+            except Exception as je:
+                print(f"Błąd parsowania wyciętego JSON-a: {je}")
 
-        return data.get("is_in_buy_or_sell_zone", False), data.get("telegram_msg_main"), data.get("telegram_msg_macro"), data.get("html_content")
+        raise ValueError("Nie znaleziono poprawnego obiektu JSON w odpowiedzi modelu.")
+
     except Exception as e:
-        print(f"Błąd zapytania do AI: {e}")
+        print(f"Błąd zapytania lub parsowania z AI: {e}")
         fallback_html = f"""<!DOCTYPE html>
 <html lang="pl">
 <head><meta charset="UTF-8"><title>Raport Rynkowy Sonic & BTC</title>
@@ -391,7 +376,7 @@ async def main():
     
     async with aiohttp.ClientSession() as session:
         sonic_metrics = await fetch_and_analyze_sonic(session)
-        btc_metrics = await fetch_multi_exchange_btc(session)
+        btc_metrics =- await fetch_multi_exchange_btc(session)
         
         is_in_zone, main_msg, macro_msg, html_content = generate_reports_and_decide(sonic_metrics, btc_metrics)
         
