@@ -15,12 +15,17 @@ DEGREES = {"cykl": 0.80, "glowny": 0.60, "posredni": 0.40, "drobny": 0.25}
 DEGREE_NAMES = {"cykl": "cykl (ruchy ≥80%)", "glowny": "główny (≥60%)", "posredni": "pośredni (≥40%)", "drobny": "drobny (≥25%)"}
 DEGREE_WEIGHT = {"cykl": 4, "glowny": 3, "posredni": 2, "drobny": 1}
 
-# Poziomy użytkownika z poprzedniej wersji bota – zachowane jako dodatkowe źródło poziomów (można zmienić)
-USER_LEVELS = [
-    dict(price=0.045, name="Dolna granica bazy (użytkownik)"),
-    dict(price=0.054, name="Górna granica bazy (użytkownik)"),
-    dict(price=0.070, name="Short Anchor (użytkownik)"),
-]
+# Poziomy planu etapowego (data/sonic_plan.json) – źródło poziomów o najwyższej wadze w drabince
+def _plan_levels():
+    try:
+        import plan as P
+        return [dict(price=l["price"], name=l["name"]) for l in P.all_levels(P.load_plan()) if l["kind"] != "invalid"]
+    except Exception as e:
+        print(f"[plan] nie wczytano poziomów planu: {e}")
+        return []
+
+
+USER_LEVELS = _plan_levels()
 
 
 def pct(a, b):
@@ -145,7 +150,7 @@ def build_levels(price, swings, ranges, fibs, book_info):
                 w = 3 if lvl in (0.618, 0.786) else 2 if lvl in (0.5, 0.382, 1.272, 1.618) else 1
                 cand.append(dict(price=p, w=w, src=f"Fibo {f'{lvl * 100:.1f}'.replace('.', ',')}% {f['label']}"))
     for u in USER_LEVELS:
-        cand.append(dict(price=u["price"], w=2, src=u["name"]))
+        cand.append(dict(price=u["price"], w=4, src="plan: " + u["name"]))
     if book_info:
         for wall in book_info["bid_walls"] + book_info["ask_walls"]:
             cand.append(dict(price=wall["price"], w=2, src=f"ściana w księdze Coinbase ~{wall['usd']:,.0f} USD"))

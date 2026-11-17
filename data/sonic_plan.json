@@ -1,0 +1,126 @@
+{
+  "meta": {
+    "version": "2026-11-17",
+    "symbol": "S (Sonic), wcześniej FTM",
+    "basis": "Analogia do hossy FTM 2023-24 (sekwencja 4h od dołka korekty 23.01.2024 do szczytu 22.03.2024) przeniesiona na dołek korekty 0.03146 (14.11.2026). Poziomy zweryfikowane strefami wsparć i oporów z historii Sonica 2025-26. Założenie: rynek wchodzi w hossę, nawet jeśli powoli.",
+    "tempo_note": "Obecny cykl jest ok. 1,6× wolniejszy niż 2023-24. Daty są orientacyjne, liczą się poziomy.",
+    "cycle_bottom": {"price": 0.01901, "date": "2026-06-25"},
+    "launch_low": {"price": 0.02094, "date": "2026-08-18"},
+    "first_impulse_top": {"price": 0.07393, "date": "2026-10-13"},
+    "correction_low": {"price": 0.03146, "date": "2026-11-14"},
+    "chart_from": "2026-08-01"
+  },
+
+  "start": {
+    "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
+    "from": "2026-11-17T09:00:00Z",
+    "phase": "BUY",
+    "step": "start"
+  },
+
+  "signal_rules": {
+    "interval": "1h (tylko zamknięte świece)",
+    "prep_sell_pct": 2.0,
+    "prep_buy_pct": 2.0,
+    "breakout_closes_1h": 2,
+    "breakout_buffer_pct": 1.0,
+    "fail_closes_1h": 2,
+    "send_window_hours": 3
+  },
+
+  "invalidation": {
+    "daily_close_below": 0.0300,
+    "next_supports": [0.0253, 0.0190],
+    "step_rule": "dwa kolejne zamknięcia 1h pod dolną granicą widełek odkupu = odkup zawiódł; nie dokupować, czekać na następne wsparcie z mapy"
+  },
+
+  "confirmations": {
+    "sonic_sma100_days": 100,
+    "sonic_ema_fast": 20,
+    "sonic_ema_slow": 50,
+    "btc_sma200_days": 200,
+    "stage1_confirm_daily_close_above": 0.0740
+  },
+
+  "steps": [
+    {"id": "start", "stage": 1, "label": "Start – akumulacja",
+     "buy": 0.0328, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0368,
+     "eta": "2026-11-17", "note": "Limit ok. 0,0326–0,0331 albo stop-buy 0,0368 przy wybiciu nad SMA100"},
+    {"id": "1a", "stage": 1, "label": "Przystanek SMA100", "checkpoint": true,
+     "level": 0.0365, "level_range": [0.0360, 0.0372], "eta": "2026-11-20",
+     "note": "Opór SMA100. Bez transakcji: dzienne zamknięcie powyżej = potwierdzenie trendu"},
+    {"id": "1", "stage": 1, "label": "Krok 1",
+     "sell": 0.0400, "sell_range": [0.0386, 0.0410], "eta": "2026-11-25",
+     "rebuy": 0.0355, "rebuy_range": [0.0345, 0.0362], "rebuy_eta": "2026-11-30"},
+    {"id": "2", "stage": 1, "label": "Krok 2",
+     "sell": 0.0445, "sell_range": [0.0430, 0.0465], "eta": "2026-12-10",
+     "rebuy": 0.0398, "rebuy_range": [0.0388, 0.0405], "rebuy_eta": "2026-12-16"},
+    {"id": "3", "stage": 1, "label": "Krok 3",
+     "sell": 0.0505, "sell_range": [0.0481, 0.0520], "eta": "2026-12-27",
+     "rebuy": 0.0440, "rebuy_range": [0.0428, 0.0450], "rebuy_eta": "2027-01-01"},
+    {"id": "4", "stage": 1, "label": "Krok 4",
+     "sell": 0.0555, "sell_range": [0.0545, 0.0590], "eta": "2027-01-06",
+     "rebuy": 0.0500, "rebuy_range": [0.0488, 0.0510], "rebuy_eta": "2027-01-09"},
+    {"id": "5", "stage": 1, "label": "Szczyt etapu 1",
+     "sell": 0.0710, "sell_range": [0.0690, 0.0770], "eta": "2027-01-16",
+     "rebuy": 0.0575, "rebuy_range": [0.0550, 0.0600], "rebuy_eta": "2027-01-26", "breakout": 0.0745,
+     "rebuy_note": "Korekta 1: na 4h w 2024 r. −25% (ok. 0,0564). Odkup płytko 0,057–0,058"},
+    {"id": "2a", "stage": 2, "label": "Etap 2a",
+     "sell": 0.0880, "sell_range": [0.0850, 0.0910], "eta": "2027-02-04",
+     "rebuy": 0.0770, "rebuy_range": [0.0740, 0.0790], "rebuy_eta": "2027-02-08"},
+    {"id": "2b", "stage": 2, "label": "Etap 2b",
+     "sell": 0.0990, "sell_range": [0.0970, 0.1020], "eta": "2027-02-13",
+     "rebuy": 0.0820, "rebuy_range": [0.0800, 0.0840], "rebuy_eta": "2027-02-17"},
+    {"id": "2c", "stage": 2, "label": "Etap 2c",
+     "sell": 0.1090, "sell_range": [0.1060, 0.1130], "eta": "2027-02-22",
+     "rebuy": 0.0930, "rebuy_range": [0.0910, 0.0950], "rebuy_eta": "2027-02-25"},
+    {"id": "2d", "stage": 2, "label": "Szczyt etapu 2",
+     "sell": 0.1200, "sell_range": [0.1160, 0.1260], "eta": "2027-02-28",
+     "rebuy": 0.0570, "rebuy_range": [0.0490, 0.0650], "rebuy_eta": "2027-06-15", "breakout": 0.1270,
+     "condition": "BTC powyżej SMA200",
+     "rebuy_note": "Długa korekta wiosna–lato 2027: gotówka, akumulacja dopiero w strefie 0,049–0,065"},
+    {"id": "3f", "stage": 3, "label": "Etap 3 (finał hossy)",
+     "sell": 0.1570, "sell_range": [0.1500, 0.1650], "eta": "2027-10-15",
+     "optimistic": [0.19, 0.23], "final": true}
+  ],
+
+  "rules": {
+    "sell": "Zlecenie sprzedaży z limitem na głównym poziomie, w dolnej części widełek. Jeśli cena w widełkach zawraca, nie czekać na górną granicę.",
+    "rebuy": "Odkup zleceniem z limitem na głównym poziomie, w górnej części widełek (płytko, ostrożnie).",
+    "rebuy_fallback_breakout": "Jeśli odkup się nie wykonał: dwa kolejne zamknięcia 1h powyżej poprzedniego celu sprzedaży = kupno na wybiciu (stop-buy).",
+    "no_day_trading": "Szum 5m/15m nie ma znaczenia. Sygnały tylko z zamkniętych świec 1h względem poziomów planu.",
+    "coinbase_execution": "S-USD na Coinbase ma płytki arkusz: zlecenia z limitem stojące w arkuszu, nie rynkowe."
+  },
+
+  "btc_levels": {
+    "_opis": "Poziomy BTC z analizy 15-17.11.2026. SMA200 liczona na bieżąco.",
+    "correction_low": {"price": 62006, "date": "2026-11-15"},
+    "correction_high": {"price": 84898, "date": "2026-10-21"},
+    "beta_sonic": 1.24,
+    "levels": [
+      {"price": 70000, "kind": "r", "label": "Opór 69–70 tys.", "range": [69000, 70000]},
+      {"price": 67000, "kind": "r", "label": "Opór 66–67 tys.", "range": [66000, 67000]},
+      {"price": 65100, "kind": "r", "label": "Szczyt odbicia 65,1 tys.", "range": [65000, 65700]},
+      {"price": 64450, "kind": "p", "label": "Poziom przebicia 64,3–64,45 tys.", "range": [64300, 64450]},
+      {"price": 63800, "kind": "s", "label": "Wsparcie kluczowe 63,8 tys.", "range": [63800, 64100]},
+      {"price": 62500, "kind": "s", "label": "Retest dna 62–63,9 tys.", "range": [62000, 63900]},
+      {"price": 59500, "kind": "s", "label": "Wariant głębszy 58–61 tys.", "range": [58000, 61000]},
+      {"price": 50000, "kind": "s", "label": "Wariant bessy ~50 tys.", "range": [49000, 51000]}
+    ],
+    "scenarios": [
+      {"name": "Dno już jest, bez retestu", "pct": 35},
+      {"name": "Retest i podwójne dno 62–63,9 tys.", "pct": 38},
+      {"name": "Zejście do 58–61 tys. (w tym ok. 10% na bessę do 50 tys.)", "pct": 27}
+    ]
+  },
+
+  "wave_stats_bull_markets_1D_zigzag30": {
+    "impulse_pct": {"p25": 50, "median": 83, "p75": 139},
+    "pullback_from_high_pct": {"p25": 34, "median": 39, "p75": 44},
+    "pullback_as_pct_of_impulse": {"p25": 65, "median": 77, "p75": 136}
+  },
+  "market_cap_context": {
+    "supply_now_S": 3.885e9,
+    "bottom_mcap_usd": {"2020-11": 3.0e7, "2023-10": 4.8e8, "2026-06": 7.4e7}
+  }
+}

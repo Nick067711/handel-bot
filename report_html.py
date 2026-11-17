@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Generowanie pliku index.html (raport dzienny) – czysty HTML + CSS + wykresy SVG, bez zewnętrznych skryptów."""
 import html, math, re
+
+import report_plan as RP
 from datetime import datetime, timezone
 
 E = html.escape
@@ -155,7 +157,7 @@ def sonic_chart_svg(s, mobile=False):
     return "".join(parts)
 
 
-def btc_chart_svg(b, mobile=False):
+def btc_chart_svg(b, mobile=False, pc=None):
     data = b["chart"]
     if len(data) < 10:
         return ""
@@ -168,6 +170,8 @@ def btc_chart_svg(b, mobile=False):
     ly = lambda v: Tp + (hi - v) / (hi - lo) * (Hh - Tp - B)
     lx = lambda t: L + (t - t0) / max(1, (t1 - t0)) * (W - L - R)
     parts = [f'<svg viewBox="0 0 {W} {Hh}" role="img" aria-label="Wykres ceny Bitcoina z ostatnich 12 miesięcy ze średnią 200-dniową" class="chart{' m' if mobile else ''}">']
+    if pc and pc.get("btc"):
+        parts.append(RP.btc_level_lines(pc, ly, L, W, R, lo, hi))
     if rp and lo < rp < hi:
         y = ly(rp)
         parts.append(f'<line x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}" class="lvl-rp"/>')
@@ -376,19 +380,11 @@ def render(ctx):
     ai = ctx.get("ai") or {}
     date_txt = ctx["generated_at"]
     sig_l, sig_s = s["setups"]["LONG"], s["setups"]["SHORT"]
-    if sig_l.get("triggered") or sig_s.get("triggered"):
-        side = "LONG" if sig_l.get("triggered") else "SHORT"
-        verdict = f"Sonic: <strong>aktywny sygnał {side}</strong> na zamknięciu dnia {fdate(s['candle_date'])}. Tło BTC dla altcoinów: <strong>{E(b['context_label'])}</strong>."
+    pc = ctx.get("plan")
+    if pc:
+        verdict = (f"Plan Sonica: <strong>{E(pc['action'])}</strong> Tło BTC dla altcoinów: <strong>{E(b['context_label'])}</strong>.")
     else:
-        lz = (sig_l.get("levels") or {})
-        dz = sig_l.get("dist_to_zone_pct")
-        broken_l = any("unieważnienia" in k and not v for k, v in (sig_l.get("conditions") or {}).items())
-        watch = ""
-        if lz.get("zone_low") and dz is not None and not broken_l:
-            where = "cena jest w strefie" if dz == 0 else f"{fpct(abs(dz), sign=False)} {'poniżej' if dz < 0 else 'powyżej'} ceny"
-            watch = f" Strefa obserwacji LONG: {fprice(lz['zone_low'])}–{fprice(lz['zone_high'])} ({where})."
-        verdict = f"Sonic: <strong>brak sygnału</strong> na zamknięciu dnia {fdate(s['candle_date'])}.{watch} Tło BTC dla altcoinów: <strong>{E(b['context_label'])}</strong>."
-
+        verdict = f"Tło BTC dla altcoinów: <strong>{E(b['context_label'])}</strong>."
     # BTC metryki
     mt = "".join(f"<div class='metric'><p class='mn'>{E(m['name'])}</p><p class='mv'>{metric_value(m)}</p>"
                  f"<p class='ms st-{m['status']}'>{STATUS_WORD.get(m['status'], m['status'])}</p><p class='me'>{E(m['explain'])}</p></div>"
@@ -450,7 +446,7 @@ def render(ctx):
 <meta name="description" content="Dzienny raport rynkowy BTC i Sonic (S): wskaźniki, poziomy wsparcia i oporu, struktura fal, sygnały.">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Newsreader:opsz,wght@6..72,400;6..72,600&display=swap" rel="stylesheet">
-<style>{CSS}</style></head><body><div class="wrap">
+<style>{CSS}{RP.PLAN_CSS}</style></head><body><div class="wrap">
 <header class="top"><div><h1>Bitcoin i Sonic – raport dzienny</h1><p class="date">{E(date_txt)}</p></div>
 <div class="tickers"><div class="tk btc"><b>{fnum(b['price'], 0)} USD</b><span>BTC {fpct(b['change_24h_pct'])} / 24h</span></div>
 <div class="tk sonic"><b>{fprice(s['price'])} USD</b><span>S {fpct(s['change_24h_pct'])} / 24h</span></div></div></header>
@@ -460,8 +456,9 @@ def render(ctx):
 <p class="lede">Lider rynku i tło dla altcoinów. Ceny: {E(', '.join(b['sources']))}.</p>
 <div class="hero"><span class="big">{fnum(b['price'], 0)} USD</span>
 <span class="chg">7 dni <b>{fpct(b['change_7d_pct'])}</b>, 30 dni <b>{fpct(b['change_30d_pct'])}</b></span></div>
-<div class='ch-d'>{btc_chart_svg(b)}</div><div class='ch-m'>{btc_chart_svg(b, True)}</div>
-<p class="legend">Linia przerywana: średnia 200 dni. Zielona linia: realized price (średni koszt nabycia BTC w sieci).</p>
+<div class='ch-d'>{btc_chart_svg(b, pc=pc)}</div><div class='ch-m'>{btc_chart_svg(b, True, pc=pc)}</div>
+<p class="legend">Linia przerywana szara: średnia 200 dni. Zielona: realized price (średni koszt nabycia BTC w sieci). Kropkowane: poziomy BTC z planu (czerwone opory, zielone wsparcia).</p>
+{('<h3>Poziomy BTC – gdzie jesteśmy</h3>' + RP.btc_ladder(pc, b['price'])) if pc else ''}
 <h3>Wskaźniki – co oznaczają dziś</h3><div class="metrics">{mt}</div>
 <p class="muted">Rynek kontraktów: {E(derivs) or 'brak danych'}.</p>
 <h3>Ocena modelu AI na tle makroekonomii</h3>{ai_btc}{research_macro}
@@ -473,11 +470,12 @@ def render(ctx):
 <span class="chg">7 dni <b>{fpct(s['change_7d_pct'])}</b>, 30 dni <b>{fpct(s['change_30d_pct'])}</b>, 90 dni <b>{fpct(s['change_90d_pct'])}</b></span></div>
 <p>Kierunek ruchu: krótkoterminowo (świece 6h) <strong>{E(d['short_term'] or 'brak danych')}</strong>, średnioterminowo (dni) <strong>{E(d['medium_term'])}</strong>,
 długoterminowo (SMA200) <strong>{E(d['long_term'])}</strong>.</p>
+{RP.plan_section(pc, s) if pc else ''}
+
+<h3>Wykres 12 miesięcy i poziomy techniczne (pomocniczo)</h3>
 <div class='ch-d'>{sonic_chart_svg(s)}</div><div class='ch-m'>{sonic_chart_svg(s, True)}</div>
 <p class="legend">Skala logarytmiczna, 12 miesięcy. Linie zielone: wsparcia, czerwone: opory. Etykiety HH/HL/LH/LL: punkty zwrotne poziomu pośredniego.</p>
-
-<h3>Gdzie jest cena: wsparcia i opory</h3>
-<p class="muted">Poziomy łączą swingi z całej historii, granice konsolidacji, linie Fibonacciego bieżących ruchów, poziomy użytkownika i ściany w księdze zleceń Coinbase. Kropki = siła (liczba i waga źródeł).</p>
+<p class="muted">Poziomy łączą poziomy planu (najwyższa waga), swingi z całej historii, granice konsolidacji, linie Fibonacciego bieżących ruchów i ściany w księdze zleceń Coinbase. Kropki = siła (liczba i waga źródeł).</p>
 {ladder_html(s)}
 
 <h3>Kontekst historyczny</h3>
@@ -508,8 +506,8 @@ długoterminowo (SMA200) <strong>{E(d['long_term'])}</strong>.</p>
 <div class="panel"><h4>Gdzie handluje się Sonikiem (CoinGecko, 24h)</h4>{exch or "<p class='muted'>Brak danych CoinGecko.</p>"}
 <p class="muted">Kapitalizacja {fusd_big(cg.get('market_cap_usd'))}, miejsce {cg.get('rank') or 'brak'} w rankingu. Głosy sentymentu na CoinGecko: {fnum(cg.get('sentiment_up_pct'), 0) if cg.get('sentiment_up_pct') is not None else 'brak'}% pozytywnych.</p></div></div>
 
-<h3>Sygnały LONG / SHORT</h3>
-<p class="muted">Sygnał pojawia się tylko w wąskiej strefie (±3,5% od linii Fibonacciego 0,618/0,786 lub poziomu historycznego) i dopiero po potwierdzeniu świecą dzienną. Powiadomienie na Telegram: najwyżej raz dziennie.</p>
+<h3>Setupy pomocnicze LONG / SHORT (Fibonacci)</h3>
+<p class="muted">Dawne reguły bota: strefa ±3,5% od linii Fibonacciego 0,618/0,786 lub poziomu historycznego, potwierdzenie świecą dzienną. Tylko informacyjnie – nie są wysyłane na ntfy; decyzje wyznacza plan etapowy.</p>
 <div class="setups">{setup_block('LONG', sig_l, s['price'])}{setup_block('SHORT', sig_s, s['price'])}</div>
 
 <h3>Ocena modelu AI</h3>{research}{ai_sonic}

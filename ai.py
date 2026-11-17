@@ -168,7 +168,8 @@ def commentary(btc_data, sonic_data, macro_text, sentiment_text):
         "Napisz komentarz o Sonic (S) do dziennego raportu dla inwestora indywidualnego.",
         "[SONIC]\n3–4 akapity: położenie ceny w historii i strukturze fal, najbliższe wsparcia/opory z odległościami, kierunek ruchu, "
         "księga zleceń, nastroje (RESEARCH SONIC), porównanie z typowymi zniesieniami Fibonacciego tego aktywa.\n"
-        "[SYGNAL]\n1–2 akapity: stan sygnałów LONG/SHORT, których warunków brakuje, przy jakich poziomach mogą się pojawić.\n"
+        "[SYGNAL]\n1–2 akapity: gdzie cena jest na mapie PLANU ETAPOWEGO (plan_etapowy w DANYCH): bieżący krok, najbliższa sprzedaż "
+        "lub strefa zakupu i odległość do nich. Plan jest nadrzędny – nie proponuj innych poziomów wejścia i wyjścia.\n"
         "[RYZYKA]\n3–5 punktów zaczynających się od \"- \".",
         sonic_data, sentiment_text, "RESEARCH SONIC – NASTROJE (wyszukiwanie w sieci)", ("SONIC", "SYGNAL", "RYZYKA"),
         "AI komentarz Sonic", 3200))
