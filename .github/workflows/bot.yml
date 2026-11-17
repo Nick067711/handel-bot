@@ -14,6 +14,9 @@ concurrency:
   group: handel-bot
   cancel-in-progress: false
 
+permissions:
+  contents: write     # bot zapisuje kopię raportu i sygnałów w folderze raport/
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
@@ -46,3 +49,17 @@ jobs:
           LANG: "C.UTF-8"
           LC_ALL: "C.UTF-8"
         run: python bot.py
+
+      - name: Zapisz raport i sygnały w repozytorium (folder raport/)
+        if: always()
+        run: |
+          git config user.name "handel-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add raport/ || exit 0
+          if git diff --cached --quiet; then echo "Brak zmian w raport/"; exit 0; fi
+          git commit -q -m "Raport bota $(date -u +'%Y-%m-%d %H:%M') UTC [skip ci]"
+          for i in 1 2 3; do
+            git pull -q --rebase origin "${GITHUB_REF_NAME}" && git push -q origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep 5
+          done
+          echo "Nie udało się wypchnąć raportu (spróbuje przy następnym uruchomieniu)"

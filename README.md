@@ -24,6 +24,19 @@ Bot uruchamiany co godzinę przez GitHub Actions:
 | `data/SONIC_FTM_S_1d.csv` | Historia świec dziennych FTM/S z Binance – bot dokleja do niej nowe świece z Coinbase. |
 | `tools/build_history.py` | Odświeża `sonic_history.py` na nowszym CSV (uruchamiane ręcznie, lokalnie). |
 
+## Kopia wyników w repozytorium (folder `raport/`)
+
+Po każdym raporcie dziennym i po każdym wysłanym sygnale workflow zapisuje i commituje:
+
+| Plik | Zawartość |
+|---|---|
+| `raport/stan.json` | te same dane co w index.html (plan, BTC, Sonic, komentarz AI) w postaci JSON |
+| `raport/index.html` | identyczna kopia strony z piwecki.pl/analiza |
+| `raport/archiwum/RRRR-MM-DD.json` | stan z każdego dnia – do sprawdzania, czy rynek idzie zgodnie z planem |
+| `raport/sygnaly.json` | dziennik wszystkich wysłanych powiadomień ntfy z pełną treścią |
+
+Commity mają dopisek `[skip ci]` i nie uruchamiają bota ponownie. Workflow ma uprawnienie `contents: write`.
+
 ## Sekrety (Settings → Secrets and variables → Actions)
 
 Wymagane: `FTP_HOST`, `FTP_USER`, `FTP_PASS`, `GROQ_API_KEY`.

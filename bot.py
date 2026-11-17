@@ -41,6 +41,7 @@ REPORT_HOUR_UTC = int(os.getenv("REPORT_HOUR_UTC", "5"))       # raport dzienny 
 FORCE_REPORT = os.getenv("FORCE_REPORT", "0") == "1"           # ręczne uruchomienie z GitHuba wymusza raport
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"                     # test lokalny: bez FTP i ntfy, raport do pliku
 STATE_FILE = "sonic_bot_state.json"
+REPO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raport")   # kopia wyników w repozytorium (commit robi workflow)
 
 
 # ----------------------------------------------------------------- FTP + stan
@@ -290,6 +291,63 @@ def ai_sonic_data(s, plan_ai=None):
         elliott_obecnie=H.ELLIOTT_INTERPRETATION[-1]["opis"]))
 
 
+# ----------------------------------------------------------------- kopia wyników w repozytorium
+def _jsonable(x):
+    if isinstance(x, dict):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_jsonable(v) for v in x]
+    if isinstance(x, float):
+        return None if x != x else round(x, 8)
+    if isinstance(x, (str, int, bool)) or x is None:
+        return x
+    return str(x)
+
+
+def write_repo_file(rel, data):
+    path = os.path.join(REPO_DIR, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        if isinstance(data, str):
+            f.write(data)
+        else:
+            json.dump(_jsonable(data), f, ensure_ascii=False, indent=1)
+    print(f"[repo] zapisano raport/{rel}")
+
+
+def repo_snapshot(ctx, pc, btc, sonic, plan_ai):
+    """Te same dane co w index.html, w postaci do czytania (JSON)."""
+    st = pc["state"]
+    return dict(
+        wygenerowano=ctx["generated_at"],
+        uwaga="Kopia danych z raportu dziennego bota (piwecki.pl/analiza). Plan etapowy: data/sonic_plan.json.",
+        plan=dict(faza=st["phase"], co_robic_teraz=pc["action"], cel_sprzedazy=st.get("target"), strefa_zakupu=st.get("zone"),
+                  ostatni_zakup=st.get("last_fill"), polozenie=pc["position"],
+                  potwierdzenia=[dict(warunek=c["name"], spelniony=c["ok"]) for c in pc["confirm"]["items"]],
+                  sygnaly_od_startu=[dict(czas_pl=N.pl_time(e["t"]), typ=e["kind"], krok=e.get("step"), cena=e["price"]) for e in pc["events"]],
+                  start_planu=pc["plan"]["start"], wersja_planu=pc["plan"]["meta"]["version"]),
+        btc=dict(dane=ai_btc_data(btc), cena=btc["price"], zmiana_24h_pct=btc.get("change_24h_pct"),
+                 poziomy=[dict(cena=l["price"], opis=l["label"], odl_pct=l["dist_pct"], w_strefie=l["inside"]) for l in pc["btc"]["levels"]],
+                 scenariusze=pc["btc"]["scenarios"],
+                 wskazniki=[dict(nazwa=m["name"], wartosc=m["value"], ocena=m["status"]) for m in btc.get("metrics", [])],
+                 kontrakty=btc.get("derivatives")),
+        sonic=dict(ai_sonic_data(sonic, plan_ai), zmiana_24h_pct=sonic.get("change_24h_pct"),
+                   wsparcia_techniczne=[dict(cena=l["price"], zrodla=l["sources"][:3]) for l in sonic["levels"]["supports"][:5]],
+                   opory_techniczne=[dict(cena=l["price"], zrodla=l["sources"][:3]) for l in sonic["levels"]["resistances"][:5]]),
+        ai=dict(model=ctx["model"], komentarz=ctx.get("ai"), research_makro=ctx.get("research_macro"), research_sonic=ctx.get("research_sonic")),
+        niedostepne_zrodla=sorted((ctx.get("errors") or {}).keys()),
+    )
+
+
+def append_signals_log(entries):
+    path = os.path.join(REPO_DIR, "sygnaly.json")
+    try:
+        old = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        old = []
+    write_repo_file("sygnaly.json", (old + entries)[-500:])
+
+
 # ----------------------------------------------------------------- główna pętla
 def plan_for_ai(pc):
     st = pc["state"]
@@ -339,11 +397,17 @@ async def main():
     btc_ctx = P.btc_position(plan, btc_now, (btc or {}).get("sma200")) if btc_now else None
     if btc_ctx:
         btc_ctx["price"] = btc_now
+    log = []
     for e in new:
         if N.send_event(e, plan, btc_ctx, click=REPORT_URL, dry_run=DRY_RUN):
             sent.add(N.key(e))
+            title, body = N.message(e, plan, btc_ctx)
+            log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ=e["kind"], krok=e.get("step"),
+                            cena=e["price"], tytul=title, tresc=body))
             state["signals"] = (state.get("signals") or [])[-99:] + [dict(kind=e["kind"], step=e.get("step"), t=e["t"],
                                                                          price=e["price"], sent_at=now.isoformat())]
+    if log:
+        append_signals_log(log)
     state["ntfy_sent"] = sorted(sent, key=lambda k: int(k.rsplit(":", 1)[-1]))[-300:]
     state["plan_phase"] = pst["phase"]
 
@@ -368,6 +432,13 @@ async def main():
                        elliott=H.ELLIOTT_INTERPRETATION, conclusions=H.CONCLUSIONS)
             html_doc = R.render(ctx)
             archive = f"{today}.html"
+            try:
+                snap = repo_snapshot(ctx, pc, btc, sonic, plan_for_ai(pc))
+                write_repo_file("stan.json", snap)
+                write_repo_file(f"archiwum/{today}.json", snap)
+                write_repo_file("index.html", html_doc)
+            except Exception as ex:
+                print(f"[repo] nie zapisano kopii raportu: {type(ex).__name__}: {ex}")
             state["last_report_date"] = today
 
     state["last_run"] = now.isoformat()
