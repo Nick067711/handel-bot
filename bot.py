@@ -5,16 +5,17 @@ handel-bot – monitor Sonic (S) + kontekst Bitcoina
 Uruchamiany co godzinę przez GitHub Actions (.github/workflows/bot.yml).
 
 Co robi przy każdym uruchomieniu:
-  1. Pobiera świece dzienne Sonica z Coinbase i dokleja je do historii z data/SONIC_FTM_S_1d.csv.
-  2. Sprawdza setupy LONG/SHORT na ostatniej ZAMKNIĘTEJ świecy dziennej (reguły w sonic_core.py,
-     przetestowane na historii 2019–2026, wyniki w sonic_history.py).
-  3. Jeśli setup jest aktywny i dziś nie wysłano jeszcze wiadomości -> Telegram (max 1 dziennie).
+  1. Pobiera świece dzienne Sonica z Coinbase i dokleja je do historii z data/SONIC_FTM_S_1d.csv,
+     oraz świece 1h Sonica od początku planu (data/sonic_plan.json).
+  2. Odtwarza plan etapowy na zamkniętych świecach 1h (plan.py): zakup, sprzedaż, odkup, kupno na wybiciu,
+     nieudany odkup, unieważnienie planu.
+  3. Nowe kluczowe sygnały (z ostatnich godzin, jeszcze niewysłane) -> ntfy (notify.py).
   4. Raz dziennie (pierwsze uruchomienie po REPORT_HOUR_UTC) buduje pełny raport:
      dane BTC (on-chain, kontrakty, nastroje), księga zleceń Coinbase, wyszukiwanie w sieci i komentarz AI (Groq),
      a potem wysyła index.html na FTP (plus kopię w archiwum).
-Stan (daty wysyłek) jest trzymany na FTP poza public_html, bo runner GitHub Actions jest za każdym razem czysty.
+Stan (wysłane sygnały, data raportu) jest trzymany na FTP poza public_html, bo runner GitHub Actions jest za każdym razem czysty.
 """
-import os, io, sys, json, html, ftplib, asyncio, urllib.parse, urllib.request
+import os, io, sys, json, html, time, ftplib, asyncio, urllib.parse, urllib.request
 from datetime import datetime, timezone, timedelta
 
 import aiohttp
@@ -22,13 +23,13 @@ import aiohttp
 import market_data as M
 import analysis as A
 import ai as AI
+import plan as P
+import notify as N
 import report_html as R
 import sonic_history as H
 from sonic_core import DAY
 
 # --- KONFIGURACJA (sekrety GitHub Actions) ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 FTP_HOST = os.getenv("FTP_HOST", "piwecki.pl")
 FTP_USER = os.getenv("FTP_USER", "")
 FTP_PASS = os.getenv("FTP_PASS", "")
@@ -38,8 +39,10 @@ FTP_USE_TLS = os.getenv("FTP_USE_TLS", "1") == "1"
 REPORT_URL = os.getenv("REPORT_URL", "https://piwecki.pl/analiza/")
 REPORT_HOUR_UTC = int(os.getenv("REPORT_HOUR_UTC", "5"))       # raport dzienny po 05:00 UTC (06/07 w Polsce)
 FORCE_REPORT = os.getenv("FORCE_REPORT", "0") == "1"           # ręczne uruchomienie z GitHuba wymusza raport
-DRY_RUN = os.getenv("DRY_RUN", "0") == "1"                     # test lokalny: bez FTP i Telegrama, raport do pliku
+DRY_RUN = os.getenv("DRY_RUN", "0") == "1"                     # test lokalny: bez FTP i ntfy, raport do pliku
 STATE_FILE = "sonic_bot_state.json"
+LIVE_UNTIL_MINUTE = int(os.getenv("LIVE_UNTIL_MINUTE", "0"))   # >0: po części godzinowej czuwaj na żywo do tej minuty godziny
+REPO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raport")   # kopia wyników w repozytorium (commit robi workflow)
 
 
 # ----------------------------------------------------------------- FTP + stan
@@ -89,7 +92,7 @@ def ftp_put(ftp, name, data: bytes):
 
 
 def load_state():
-    default = {"last_report_date": None, "last_telegram_date": None, "last_signal": None, "signals": []}
+    default = {"last_report_date": None, "ntfy_sent": [], "signals": []}
     if ftp_configured():
         try:
             with ftp_connect() as ftp:
@@ -139,67 +142,28 @@ def publish(state, html_doc=None, archive_name=None):
         return False
 
 
-# ----------------------------------------------------------------- Telegram
-def send_telegram(text):
-    if DRY_RUN:
-        print("[DRY_RUN] Telegram:\n" + text)
-        return True
-    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
-        print("[Telegram] brak TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID")
-        return False
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = urllib.parse.urlencode({"chat_id": TELEGRAM_CHAT_ID, "text": text[:4000], "parse_mode": "HTML",
-                                      "disable_web_page_preview": "true"}).encode("utf-8")
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url, data=payload, method="POST"), timeout=15) as r:
-            ok = json.loads(r.read().decode("utf-8")).get("ok", False)
-            print("[Telegram] wysłano" if ok else "[Telegram] API zwróciło ok=false")
-            return ok
-    except urllib.error.HTTPError as e:
-        print(f"[Telegram] HTTP {e.code}: {e.read().decode('utf-8', 'ignore')[:200]}")
-    except Exception as e:
-        print(f"[Telegram] błąd: {e}")
-    return False
-
-
-def telegram_text(side, st, sonic, btc):
-    e = html.escape
-    lv = st["levels"]; bt = st.get("backtest") or {}
-    price = sonic["price"]
-    icon = "🟢" if side == "LONG" else "🔴"
-    hits = ", ".join([f"Fibo {f}" for f in st.get("fib_hits", [])] + [R.fprice(p) for p in st.get("hist_hits", [])[:2]])
-    sup, res = sonic["levels"]["key_support"], sonic["levels"]["key_resistance"]
-    ob = sonic.get("orderbook") or {}
-    walls = ob.get("bid_walls" if side == "LONG" else "ask_walls") or []
-    lines = [
-        f"{icon} <b>SONIC (S) – sygnał {side}</b>",
-        f"Świeca dzienna z {R.fdate(sonic['candle_date'])} (zamknięta)",
-        "",
-        f"Cena: <b>{R.fprice(price)} USD</b>",
-        f"Strefa: {R.fprice(lv['zone_low'])} – {R.fprice(lv['zone_high'])} (dotknięte: {e(hits) or 'strefa'})",
-        f"Ruch odniesienia: {R.fprice(st['leg']['start'])} → {R.fprice(st['leg']['end'])}",
-        f"Stop / unieważnienie: <b>{R.fprice(lv['stop'])}</b> ({R.fpct(A.pct(lv['stop'], price))})",
-        f"Cel: <b>{R.fprice(lv['target'])}</b> ({R.fpct(A.pct(lv['target'], price))}), stosunek zysk/ryzyko {R.fnum(lv['rr'], 1)}",
-        "",
-        f"Historia setupu: {bt.get('n')} sygnałów, trafność {R.fnum(bt.get('win_rate'), 0)}%, średnio {R.fnum(bt.get('avg_R'), 2)}R"
-        + (" (sygnał niższej pewności)" if side == "SHORT" else ""),
-    ]
-    if sup or res:
-        lines.append(f"Najbliższe kluczowe: wsparcie {R.fprice(sup['price']) if sup else 'brak'} ({R.fpct(sup['dist_pct']) if sup else ''}), "
-                     f"opór {R.fprice(res['price']) if res else 'brak'} ({R.fpct(res['dist_pct']) if res else ''})")
-    if walls:
-        w = walls[0]
-        lines.append(f"Księga Coinbase: ściana {'kupna' if side == 'LONG' else 'sprzedaży'} {R.fprice(w['price'])} (~{R.fusd_big(w['usd'])})")
-    tp = sonic["turning"]
-    lines.append(f"Podobieństwo do historycznych {'dołków' if side == 'LONG' else 'szczytów'}: "
-                 f"{tp['bottom_score'] if side == 'LONG' else tp['top_score']}/7 warunków")
-    if btc:
-        lines.append(f"BTC: {R.fnum(btc['price'], 0)} USD ({R.fpct(btc['change_7d_pct'])} / 7 dni), tło dla altcoinów: <b>{e(btc['context_label'])}</b>")
-    lines += ["", f"Raport: {REPORT_URL}", "To nie jest porada inwestycyjna."]
-    return "\n".join(lines)
-
-
 # ----------------------------------------------------------------- dane
+async def fetch_sonic_1h(session, errors, from_ts):
+    """Świece 1h Sonica od początku planu (Coinbase, zapas: Kraken – ostatnie 30 dni)."""
+    c1h = await M.safe(M.coinbase_candles(session, "S-USD", 3600, start_ts=from_ts - 6 * 3600), "Coinbase S-USD świece 1h", errors)
+    src = "Coinbase"
+    if not c1h:
+        c1h = await M.safe(M.kraken_ohlc(session, "SUSD", 60), "Kraken S/USD świece 1h", errors)
+        src = "Kraken"
+    c1h = A.closed_only(c1h or [], period=3600)
+    print(f"[Sonic 1h] świec: {len(c1h)} ({src}), ostatnia {datetime.fromtimestamp(c1h[-1]['t'], timezone.utc):%Y-%m-%d %H:%M} UTC" if c1h else "[Sonic 1h] brak świec")
+    return c1h, src
+
+
+async def fetch_btc_price(session, errors):
+    for label, fn in (("Coinbase BTC ticker", lambda: M.coinbase_ticker(session, "BTC-USD")),
+                      ("Kraken BTC ticker", lambda: M.kraken_ticker(session, "XBTUSD"))):
+        t = await M.safe(fn(), label, errors)
+        if t:
+            return t["price"]
+    return None
+
+
 async def fetch_sonic(session, errors, full):
     hist, path = A.load_history_csv()
     if not hist:
@@ -293,7 +257,7 @@ def ai_btc_data(btc):
         ocena_tla_dla_altcoinow=btc["context_label"]))
 
 
-def ai_sonic_data(s):
+def ai_sonic_data(s, plan_ai=None):
     lv, ob, tp = s["levels"], s.get("orderbook") or {}, s["turning"]
     lvl = lambda l: dict(cena=l["price"], odl_pct=l["dist_pct"], zrodla=l["sources"][:2])
     setups = {}
@@ -322,51 +286,140 @@ def ai_sonic_data(s):
         if ob else None,
         coingecko=dict(ranking=cg.get("rank"), sentyment_pozytywny_pct=cg.get("sentiment_up_pct"),
                        gieldy=[f"{e['exchange']} {e['share_pct']:.0f}%" for e in (cg.get("exchanges_volume") or [])[:3]]) if cg else None,
-        setupy=setups,
+        setupy_pomocnicze=setups,
+        plan_etapowy=plan_ai,
         wnioski_z_historii=H.CONCLUSIONS[1:3] + H.CONCLUSIONS[7:9],
         elliott_obecnie=H.ELLIOTT_INTERPRETATION[-1]["opis"]))
 
 
+# ----------------------------------------------------------------- kopia wyników w repozytorium
+def _jsonable(x):
+    if isinstance(x, dict):
+        return {str(k): _jsonable(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_jsonable(v) for v in x]
+    if isinstance(x, float):
+        return None if x != x else round(x, 8)
+    if isinstance(x, (str, int, bool)) or x is None:
+        return x
+    return str(x)
+
+
+def write_repo_file(rel, data):
+    path = os.path.join(REPO_DIR, rel)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        if isinstance(data, str):
+            f.write(data)
+        else:
+            json.dump(_jsonable(data), f, ensure_ascii=False, indent=1)
+    print(f"[repo] zapisano raport/{rel}")
+
+
+def repo_snapshot(ctx, pc, btc, sonic, plan_ai):
+    """Te same dane co w index.html, w postaci do czytania (JSON)."""
+    st = pc["state"]
+    return dict(
+        wygenerowano=ctx["generated_at"],
+        uwaga="Kopia danych z raportu dziennego bota (piwecki.pl/analiza). Plan etapowy: data/sonic_plan.json.",
+        plan=dict(faza=st["phase"], co_robic_teraz=pc["action"], cel_sprzedazy=st.get("target"), strefa_zakupu=st.get("zone"),
+                  ostatni_zakup=st.get("last_fill"), polozenie=pc["position"],
+                  potwierdzenia=[dict(warunek=c["name"], spelniony=c["ok"]) for c in pc["confirm"]["items"]],
+                  sygnaly_od_startu=[dict(czas_pl=N.pl_time(e["t"]), typ=e["kind"], krok=e.get("step"), cena=e["price"]) for e in pc["events"]],
+                  start_planu=pc["plan"]["start"], wersja_planu=pc["plan"]["meta"]["version"]),
+        btc=dict(dane=ai_btc_data(btc), cena=btc["price"], zmiana_24h_pct=btc.get("change_24h_pct"),
+                 poziomy=[dict(cena=l["price"], opis=l["label"], odl_pct=l["dist_pct"], w_strefie=l["inside"]) for l in pc["btc"]["levels"]],
+                 scenariusze=pc["btc"]["scenarios"],
+                 wskazniki=[dict(nazwa=m["name"], wartosc=m["value"], ocena=m["status"]) for m in btc.get("metrics", [])],
+                 kontrakty=btc.get("derivatives")),
+        sonic=dict(ai_sonic_data(sonic, plan_ai), zmiana_24h_pct=sonic.get("change_24h_pct"),
+                   wsparcia_techniczne=[dict(cena=l["price"], zrodla=l["sources"][:3]) for l in sonic["levels"]["supports"][:5]],
+                   opory_techniczne=[dict(cena=l["price"], zrodla=l["sources"][:3]) for l in sonic["levels"]["resistances"][:5]]),
+        ai=dict(model=ctx["model"], komentarz=ctx.get("ai"), research_makro=ctx.get("research_macro"), research_sonic=ctx.get("research_sonic")),
+        niedostepne_zrodla=sorted((ctx.get("errors") or {}).keys()),
+    )
+
+
+def append_signals_log(entries):
+    path = os.path.join(REPO_DIR, "sygnaly.json")
+    try:
+        old = json.load(open(path, encoding="utf-8"))
+    except Exception:
+        old = []
+    write_repo_file("sygnaly.json", (old + entries)[-500:])
+
+
 # ----------------------------------------------------------------- główna pętla
+def plan_for_ai(pc):
+    st = pc["state"]
+    return dict(faza=st["phase"], co_robic_teraz=pc["action"],
+                cel_sprzedazy=(st.get("target") or {}).get("main"), strefa_zakupu=[(st.get("zone") or {}).get("lo"), (st.get("zone") or {}).get("hi")],
+                uniewaznienie_zamkniecie_dnia_ponizej=pc["plan"]["invalidation"]["daily_close_below"],
+                ostatnie_sygnaly=[f"{N.pl_time(e['t'])} {e['kind']} {e.get('step')}" for e in pc["events"][-4:]],
+                uwaga="Plan etapowy jest nadrzędny. Komentarz ma się do niego odnosić, nie proponować innych poziomów wejścia/wyjścia.")
+
+
 async def main():
     now = datetime.now(timezone.utc)
+    now_ts = int(now.timestamp())
     today = now.strftime("%Y-%m-%d")
     state = load_state()
+    plan = P.load_plan()
     report_due = FORCE_REPORT or DRY_RUN or (state.get("last_report_date") != today and now.hour >= REPORT_HOUR_UTC)
     print(f"Start {now:%Y-%m-%d %H:%M} UTC | raport dzienny: {'TAK' if report_due else 'nie'} | "
-          f"ostatni raport {state.get('last_report_date')} | ostatni Telegram {state.get('last_telegram_date')}")
+          f"ostatni raport {state.get('last_report_date')} | plan {plan['meta']['version']}")
     errors = {}
 
     async with aiohttp.ClientSession() as session:
         sd = await fetch_sonic(session, errors, full=report_due)
+        c1h, src1h = await fetch_sonic_1h(session, errors, P.iso_ts(plan["start"]["from"]))
         if len(sd["candles"]) < 250:
             print("KRYTYCZNE: za mało świec Sonica do analizy – przerywam bez publikacji")
             publish(state)
             sys.exit(1)
-        sonic = A.analyze_sonic(sd["candles"], sd["ticker"], sd["stats"], sd["book"], sd["cg"], sd["c6h"])
-        print(f"[Sonic] cena {sonic['price']}, świeca {sonic['candle_date']}, "
-              f"LONG={'TAK' if sonic['setups']['LONG']['triggered'] else 'nie'}, SHORT={'TAK' if sonic['setups']['SHORT']['triggered'] else 'nie'}")
 
-        triggered = [side for side in ("LONG", "SHORT") if sonic["setups"][side]["triggered"]]
-        need_telegram = bool(triggered) and sd["fresh"] and state.get("last_telegram_date") != today and \
-            (state.get("last_signal") or {}).get("candle_date") != sonic["candle_date"]
+        # --- plan etapowy na świecach 1h
+        rp = P.replay(plan, c1h, sd["candles"])
+        pst = rp["state"]
+        fresh_1h = bool(c1h) and c1h[-1]["t"] >= now_ts - 3 * 3600
+        sent = set(state.get("ntfy_sent") or [])
+        new = N.select_new(rp["events"], sent, now_ts, plan["signal_rules"]["send_window_hours"]) if fresh_1h else []
+        print(f"[plan] faza {pst['phase']}, zdarzeń od startu planu: {len(rp['events'])}, nowych do wysłania: {len(new)}"
+              + ("" if fresh_1h else " (świece 1h nieświeże – nie wysyłam)"))
+
         btc = None
-        if report_due or need_telegram:
-            btc = await fetch_btc(session, errors, full=report_due)
+        btc_now = await fetch_btc_price(session, errors) if (new or report_due) else None
+        if report_due:
+            btc = await fetch_btc(session, errors, full=True)
+            if btc and not btc_now:
+                btc_now = btc["price"]
 
-    # --- Telegram: tylko przy sygnale, najwyżej raz dziennie
-    if triggered and not sd["fresh"]:
-        print("[sygnał] setup aktywny, ale dane nie są świeże – nie wysyłam")
-    if need_telegram:
-        side = "LONG" if "LONG" in triggered else "SHORT"     # LONG ma silniejszą historię
-        st = sonic["setups"][side]
-        if send_telegram(telegram_text(side, st, sonic, btc)):
-            state["last_telegram_date"] = today
-            state["last_signal"] = dict(side=side, candle_date=sonic["candle_date"], price=sonic["price"],
-                                        stop=st["levels"]["stop"], target=st["levels"]["target"], sent_at=now.isoformat())
-            state["signals"] = (state.get("signals") or [])[-49:] + [state["last_signal"]]
-    elif triggered:
-        print("[Telegram] sygnał już wysłany dziś lub dla tej świecy – pomijam")
+    # --- ntfy: kluczowe sygnały planu
+    btc_ctx = P.btc_position(plan, btc_now, (btc or {}).get("sma200")) if btc_now else None
+    if btc_ctx:
+        btc_ctx["price"] = btc_now
+    log = []
+    sent_cls = set(state.get("sent_cls") or [])
+    for e in new:
+        ck, lvl = P.event_class_key(plan, e)
+        confirm = False
+        if ck and lvl == "near" and (ck + ":near" in sent_cls or ck + ":hit" in sent_cls):
+            sent.add(N.key(e))            # ostrzeżenie już poszło na żywo
+            continue
+        if ck and lvl == "hit" and ck + ":hit" in sent_cls:
+            confirm = True                # alert na żywo już był – teraz tylko potwierdzenie z zamkniętej świecy
+        ok, title, body = N.send_event(e, plan, btc_ctx, click=REPORT_URL, dry_run=DRY_RUN, confirm=confirm)
+        if ok:
+            sent.add(N.key(e))
+            if ck:
+                sent_cls.add(f"{ck}:{lvl}")
+            log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ="CONFIRM" if confirm else e["kind"],
+                            krok=e.get("step"), cena=e["price"], tytul=title, tresc=body))
+            state["signals"] = (state.get("signals") or [])[-99:] + [dict(kind=e["kind"], step=e.get("step"), t=e["t"],
+                                                                         price=e["price"], sent_at=now.isoformat())]
+    state["sent_cls"] = sorted(sent_cls)[-400:]
+    state["ntfy_sent"] = sorted(sent, key=lambda k: int(k.rsplit(":", 1)[-1]))[-300:]
+    state["plan_phase"] = pst["phase"]
 
     # --- raport dzienny
     html_doc = archive = None
@@ -374,15 +427,28 @@ async def main():
         if btc is None:
             print("[BTC] brak danych BTC – raport bez sekcji BTC nie zostanie opublikowany")
         else:
+            sonic = A.analyze_sonic(sd["candles"], sd["ticker"], sd["stats"], sd["book"], sd["cg"], sd["c6h"])
+            price = sonic["price"]
+            pc = dict(plan=plan, state=pst, events=rp["events"], action=P.next_action(plan, pst),
+                      position=P.position(plan, price, pst), confirm=P.confirmations(plan, sd["candles"], btc.get("chart")),
+                      btc=P.btc_position(plan, btc["price"], btc.get("sma200")), path=P.projection_path(plan),
+                      c1h_source=src1h, price=price)
             date_pl = now.strftime("%d.%m.%Y, %H:%M UTC")
             macro = await asyncio.to_thread(AI.research_macro, date_pl)
             senti = await asyncio.to_thread(AI.research_sonic_sentiment, date_pl)
-            comment = await asyncio.to_thread(AI.commentary, ai_btc_data(btc), ai_sonic_data(sonic), macro, senti)
-            ctx = dict(sonic=sonic, btc=btc, ai=comment, research_macro=macro, research_sonic=senti,
+            comment = await asyncio.to_thread(AI.commentary, ai_btc_data(btc), ai_sonic_data(sonic, plan_for_ai(pc)), macro, senti)
+            ctx = dict(sonic=sonic, btc=btc, ai=comment, research_macro=macro, research_sonic=senti, plan=pc,
                        model=AI.GROQ_MODEL, generated_at=date_pl, errors=errors,
                        elliott=H.ELLIOTT_INTERPRETATION, conclusions=H.CONCLUSIONS)
             html_doc = R.render(ctx)
             archive = f"{today}.html"
+            try:
+                snap = repo_snapshot(ctx, pc, btc, sonic, plan_for_ai(pc))
+                write_repo_file("stan.json", snap)
+                write_repo_file(f"archiwum/{today}.json", snap)
+                write_repo_file("index.html", html_doc)
+            except Exception as ex:
+                print(f"[repo] nie zapisano kopii raportu: {type(ex).__name__}: {ex}")
             state["last_report_date"] = today
 
     state["last_run"] = now.isoformat()
@@ -390,8 +456,52 @@ async def main():
     ok = publish(state, html_doc, archive)
     if html_doc and not ok:
         state["last_report_date"] = None   # spróbuj ponownie przy następnym uruchomieniu
+        if log:
+            append_signals_log(log)
         sys.exit(1)
+
+    # --- czuwanie na żywo do końca godziny (sygnały w trakcie budowania świecy 1h)
+    if LIVE_UNTIL_MINUTE and fresh_1h and pst["phase"] in ("BUY", "HOLD"):
+        hour0 = now_ts - now_ts % 3600
+        deadline = hour0 + LIVE_UNTIL_MINUTE * 60
+        if time.time() < deadline - 60:
+            await live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx)
+    if log:
+        append_signals_log(log)
     print("Koniec cyklu.")
+
+
+async def live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx):
+    """Co ok. minutę sprawdza cenę Sonica (środek bid/ask z Coinbase) względem poziomów bieżącego kroku planu."""
+    poll = plan["signal_rules"].get("live_poll_seconds", 60)
+    watches = P.live_watches(plan, pst)
+    print(f"[live] czuwam do {datetime.fromtimestamp(deadline, timezone.utc):%H:%M} UTC, poziomy: "
+          + ", ".join(f"{w['kind']} {w['step']} @{P.fmt(w['level'])}" for w in watches))
+    errs, last_btc, n = {}, 0.0, 0
+    async with aiohttp.ClientSession() as session:
+        while time.time() < deadline:
+            t = await M.safe(M.coinbase_ticker(session, "S-USD"), "Coinbase S-USD ticker (live)", errs)
+            if t:
+                price = (t["bid"] + t["ask"]) / 2 if t.get("bid") and t.get("ask") else t["price"]
+                n += 1
+                alerts = P.live_check(plan, pst, price, sent_cls)
+                if alerts:
+                    if time.time() - last_btc > 300:
+                        bp = await fetch_btc_price(session, errs)
+                        if bp:
+                            btc_ctx = P.btc_position(plan, bp, (btc_ctx or {}).get("sma200"))
+                            btc_ctx["price"] = bp
+                            last_btc = time.time()
+                    for key, lvl, w in alerts:
+                        title, body, pr, tg = N.live_message(w, lvl, price, plan, btc_ctx)
+                        if N.send(title, body, pr, tg, REPORT_URL, DRY_RUN):
+                            sent_cls.add(key)
+                            log.append(dict(wyslano=datetime.now(timezone.utc).isoformat(), czas_swiecy_pl="na żywo",
+                                            typ=f"LIVE_{w['kind']}_{lvl.upper()}", krok=w["step"], cena=price, tytul=title, tresc=body))
+                    state["sent_cls"] = sorted(sent_cls)[-400:]
+                    publish(state)        # zapisz od razu, żeby kolejne uruchomienie nie powtórzyło alertu
+            await asyncio.sleep(poll)
+    print(f"[live] koniec czuwania, sprawdzeń ceny: {n}")
 
 
 if __name__ == "__main__":

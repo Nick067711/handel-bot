@@ -2,7 +2,7 @@ name: Sonic & BTC – monitor i raport
 
 on:
   schedule:
-    - cron: '7 * * * *'
+    - cron: '1 * * * *'   # co godzinę, tuż po zamknięciu świecy 1h; potem czuwanie na żywo do :56 (GitHub potrafi opóźnić start)
   workflow_dispatch:
     inputs:
       force_report:
@@ -14,10 +14,13 @@ concurrency:
   group: handel-bot
   cancel-in-progress: false
 
+permissions:
+  contents: write     # bot zapisuje kopię raportu i sygnałów w folderze raport/
+
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,13 +39,28 @@ jobs:
       - name: Run bot
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC || 'Sonic-buy-sell' }}
+          NTFY_TOKEN: ${{ secrets.NTFY_TOKEN }}
           FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASS }}
+          LIVE_UNTIL_MINUTE: "56"   # po części godzinowej bot czuwa na żywo (co minutę) do :56
           FORCE_REPORT: ${{ github.event_name == 'workflow_dispatch' && inputs.force_report && '1' || '0' }}
           PYTHONIOENCODING: "utf-8"
           LANG: "C.UTF-8"
           LC_ALL: "C.UTF-8"
         run: python bot.py
+
+      - name: Zapisz raport i sygnały w repozytorium (folder raport/)
+        if: always()
+        run: |
+          git config user.name "handel-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add raport/ || exit 0
+          if git diff --cached --quiet; then echo "Brak zmian w raport/"; exit 0; fi
+          git commit -q -m "Raport bota $(date -u +'%Y-%m-%d %H:%M') UTC [skip ci]"
+          for i in 1 2 3; do
+            git pull -q --rebase origin "${GITHUB_REF_NAME}" && git push -q origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep 5
+          done
+          echo "Nie udało się wypchnąć raportu (spróbuje przy następnym uruchomieniu)"
