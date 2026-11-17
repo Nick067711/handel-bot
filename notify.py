@@ -44,6 +44,35 @@ def fp(x, sign=False):
     return (f"{x:+.1f}%" if sign else f"{x:.1f}%").replace(".", ",")
 
 
+def fu(x):
+    return f"{x:,.0f}".replace(",", " ") + " USD"
+
+
+def fsn(x):
+    return f"{x:,.0f}".replace(",", " ") + " S"
+
+
+def amounts_text(plan, side, step, mid=False):
+    """Kwoty wg prognozy planu (wariant ostrożny, prowizja z data/sonic_plan.json)."""
+    try:
+        from plan import amounts_for, start_amounts, fmt as F
+        if side == "buy" and step == "start":
+            a = start_amounts(plan)
+            return f"Wg planu: {fsn(a['S'])} przy limicie {F(a['limit'])} = ok. {fu(a['usd'])} z prowizją."
+        r = amounts_for(plan, step, mid)
+        if not r:
+            return ""
+        if side == "sell":
+            return (f"Wg planu masz ok. {fsn(r['S_in'])} → przy limicie {F(r['sell'])}: {fu(r['usd'])} "
+                    f"(w widełkach {F(r['sell_lo'])}–{F(r['sell_hi'])}: {fu(r['usd_lo'])} – {fu(r['usd_hi'])}).")
+        if r.get("rebuy"):
+            return (f"Wg planu masz ok. {fu(r['usd'])} → przy limicie {F(r['rebuy'])}: {fsn(r['S'])} "
+                    f"(gdyby zeszło do {F(r['rebuy_lo'])}: do {fsn(r['S_hi'])}).")
+    except Exception as ex:
+        print(f"[ntfy] brak kwot: {ex}")
+    return ""
+
+
 def btc_line(btc):
     if not btc or not btc.get("price"):
         return ""
@@ -140,6 +169,17 @@ def message(e, plan, btc=None):
         lines.append(f"Kolejne wsparcia: {', '.join(fmt(x) for x in nx)}. Nowy plan po analizie.")
     else:
         title, lines = k, [str(e)]
+    amt = ""
+    if k in ("SELL", "PREP_SELL"):
+        amt = amounts_text(plan, "sell", t["step"])
+    elif k in ("BUY", "PREP_BUY"):
+        amt = amounts_text(plan, "buy", z["step"])
+    elif k in ("MID_SELL", "PREP_MID"):
+        amt = amounts_text(plan, "sell", e["mid"]["id"], mid=True)
+    elif k == "MID_REBUY":
+        amt = amounts_text(plan, "buy", e["mid"]["id"], mid=True)
+    if amt:
+        lines.append(amt)
     bl = btc_line(btc)
     if bl:
         lines.append(bl)
@@ -219,6 +259,11 @@ def live_message(w, level, price, plan, btc=None, now_ts=None):
                  f"limit {fmt(m['rebuy_limit'])}.")
     else:
         title, pr, tg = k, 3, []
+    amt = {"SELL": lambda: amounts_text(plan, "sell", w["step"]), "BUY": lambda: amounts_text(plan, "buy", w["step"]),
+           "MID": lambda: amounts_text(plan, "sell", w["step"], mid=True),
+           "MID_REBUY": lambda: amounts_text(plan, "buy", w["step"], mid=True)}.get(k, lambda: "")()
+    if amt:
+        L.append(amt)
     bl = btc_line(btc)
     if bl:
         L.append(bl)
