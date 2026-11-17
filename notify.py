@@ -70,22 +70,22 @@ def message(e, plan, btc=None):
             lines.append(f"Świeca 1h zamknięta {when}: cena zeszła do {fmt(z['trigger'])} (strefa {fmt(z['lo'])}–{fmt(z['hi'])}).")
         else:
             title = f"ODKUP Sonic – po kroku {z['step']}"
-            lines.append(f"Świeca 1h zamknięta {when}: cena w strefie odkupu {fmt(z['lo'])}–{fmt(z['hi'])}. Limit ok. {fmt(z['main'])}.")
+            lines.append(f"Świeca 1h zamknięta {when}: cena w strefie odkupu {fmt(z['lo'])}–{fmt(z['hi'])}. Limit {fmt(z['limit'])} (górna granica – wariant ostrożny).")
         if t:
-            lines.append(f"Od razu ustaw sprzedaż z limitem: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+            lines.append(f"Od razu ustaw sprzedaż z limitem: {t['label']} {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}, główny poziom {fmt(t['main'])}).")
         lines.append(f"Unieważnienie planu: zamknięcie dnia poniżej {fmt(inv)}.")
     elif k == "BUY_BREAKOUT":
         title = "KUPNO NA WYBICIU – Sonic"
         lines.append(f"Odkup się nie wykonał, a 2 kolejne świece 1h zamknęły się powyżej {fmt(e['level'])} (ostatnia {when}, {fmt(e['price'])}).")
         lines.append("Plan: kupić na wybiciu (stop-buy/limit tuż nad ceną), żeby nie zostać bez pozycji.")
         if t:
-            lines.append(f"Następna sprzedaż: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+            lines.append(f"Następna sprzedaż: {t['label']} – limit {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
     elif k == "SELL":
         title = f"SPRZEDAJ Sonic – {t['label']}"
         lines.append(f"Świeca 1h zamknięta {when} weszła w widełki sprzedaży {fmt(t['lo'])}–{fmt(t['hi'])} (główny poziom {fmt(t['main'])}).")
-        lines.append("Sprzedaj w dolnej części widełek; jeśli cena w widełkach zawraca – nie czekaj na górną granicę.")
+        lines.append(f"Sprzedaj – limit {fmt(t['limit'])} (wariant ostrożny); jeśli cena w widełkach zawraca – nie czekaj, sprzedaj od razu.")
         if z:
-            lines.append(f"Potem odkup: {fmt(z['lo'])}–{fmt(z['hi'])}, limit ok. {fmt(z['main'])} "
+            lines.append(f"Potem odkup: {fmt(z['lo'])}–{fmt(z['hi'])}, limit {fmt(z['limit'])} (górna granica) "
                          f"(plan zakłada cofnięcie ok. {pct(z['main'], t['main']):.0f}%).")
             if z.get("breakout"):
                 lines.append(f"Jeśli nie zejdzie: kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(z['breakout'])}.")
@@ -97,10 +97,10 @@ def message(e, plan, btc=None):
         title = f"Przygotuj sprzedaż – {t['label']}"
         lines.append(f"Świeca 1h zamknięta {when}: szczyt {fmt(e.get('high') or e['price'])}, cena {fmt(e['price'])} – "
                      f"{fp(abs(pct(t['lo'], e['price'])))} pod widełkami {fmt(t['lo'])}–{fmt(t['hi'])}.")
-        lines.append(f"Ustaw zlecenie sprzedaży z limitem {fmt(t['main'])} (albo w dolnej części widełek). Coinbase: limit stojący w arkuszu, nie rynkowe.")
+        lines.append(f"Ustaw zlecenie sprzedaży z limitem {fmt(t['limit'])} (wariant ostrożny; widełki {fmt(t['lo'])}–{fmt(t['hi'])}). Coinbase: limit stojący w arkuszu, nie rynkowe.")
     elif k == "PREP_BUY":
         title = "Przygotuj zakup Sonic" if z["step"] == "start" else f"Przygotuj odkup – po kroku {z['step']}"
-        lim = z['trigger'] if z['step'] == 'start' else z['main']
+        lim = z['limit']
         lines.append(f"Świeca 1h zamknięta {when}: dołek {fmt(e.get('low') or e['price'])}, cena {fmt(e['price'])} – "
                      f"{fp(pct(e['price'], lim))} nad limitem {fmt(lim)} (strefa {fmt(z['lo'])}–{fmt(z['hi'])}).")
         lines.append(f"Ustaw zlecenie kupna z limitem ok. {fmt(lim)} (Coinbase: limit stojący w arkuszu).")
@@ -121,9 +121,9 @@ def message(e, plan, btc=None):
         m = e["mid"]
         title = f"Odkup po kroku pośrednim {m['id']}"
         lines.append(f"Jeśli sprzedałeś na kroku pośrednim ({fmt(m['main'])}): świeca 1h zamknięta {when} zeszła do strefy odkupu "
-                     f"{fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} (dołek {fmt(e.get('low'))}). Kup z limitem ok. {fmt(m['rebuy'])}.")
+                     f"{fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} (dołek {fmt(e.get('low'))}). Kup z limitem {fmt(m['rebuy_limit'])}.")
         if t:
-            lines.append(f"Główny cel bez zmian: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+            lines.append(f"Główny cel bez zmian: {t['label']} – limit {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
         lines.append("Jeśli nie sprzedawałeś – nic nie rób, plan trzyma pozycję.")
     elif k == "MID_BREAKOUT":
         m = e["mid"]
@@ -131,7 +131,7 @@ def message(e, plan, btc=None):
         lines.append(f"Jeśli sprzedałeś na {fmt(m['main'])}: 2 zamknięcia 1h powyżej {fmt(m['breakout'])} (ostatnie {when}, {fmt(e['price'])}) – "
                      f"odkup na wybiciu, żeby nie zostać bez pozycji.")
         if t:
-            lines.append(f"Główny cel: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+            lines.append(f"Główny cel: {t['label']} – limit {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
         lines.append("Jeśli nie sprzedawałeś – nic nie rób.")
     elif k == "INVALID":
         title = "PLAN UNIEWAŻNIONY – Sonic"
@@ -148,13 +148,13 @@ def message(e, plan, btc=None):
 
 def mid_advice(m, t):
     out = ["To krok POŚREDNI – decyzja na gorąco: spójrz na wykres 15m/1h. Sprzedaj tylko, jeśli cena wyraźnie zawraca "
-           "(długi górny knot, kolejne niższe świece). Jeśli rośnie z impetem – trzymaj do głównego celu."]
-    out.append(f"Jeśli sprzedasz: odkup {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} (limit ok. {fmt(m['rebuy'])}) "
+           f"(długi górny knot, kolejne niższe świece) – limit {fmt(m['limit'])}. Jeśli rośnie z impetem – trzymaj do głównego celu."]
+    out.append(f"Jeśli sprzedasz: odkup {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} (limit {fmt(m['rebuy_limit'])}) "
                f"albo kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(round(m['breakout'] * 1.01, 4))}.")
     if m.get("note"):
         out.append(m["note"])
     if t:
-        out.append(f"Główny cel planu: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+        out.append(f"Główny cel planu: {t['label']} – limit {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
     return out
 
 
@@ -172,10 +172,10 @@ def live_message(w, level, price, plan, btc=None, now_ts=None):
         if level == "near":
             title, pr, tg = f"Sonic zbliża się do sprzedaży – {t['label']}", 4, ["hourglass"]
             L[0] = L[0][:-1] + f" – {fp(abs(pct(t['lo'], price)))} pod widełkami {zone_txt(t)}."
-            L.append(f"Obserwuj. Jeśli nie masz jeszcze zlecenia: sprzedaż z limitem {fmt(t['main'])} albo od {fmt(t['lo'])} (dolna część widełek).")
+            L.append(f"Obserwuj. Jeśli nie masz jeszcze zlecenia: sprzedaż z limitem {fmt(t['limit'])} (wariant ostrożny).")
         else:
             title, pr, tg = f"SONIC W WIDEŁKACH SPRZEDAŻY – {t['label']}", 5, ["red_circle"]
-            L.append(f"Widełki {zone_txt(t)}, główny poziom {fmt(t['main'])}. Sprzedaj w dolnej części widełek; jeśli cena zawraca – nie czekaj.")
+            L.append(f"Widełki {zone_txt(t)}, główny poziom {fmt(t['main'])}. Sprzedaj – limit {fmt(t['limit'])}; jeśli cena zawraca – nie czekaj.")
             nz = None
             try:
                 from plan import buy_zone
@@ -183,7 +183,7 @@ def live_message(w, level, price, plan, btc=None, now_ts=None):
             except Exception:
                 pass
             if nz:
-                L.append(f"Potem odkup {zone_txt(nz)} (limit ok. {fmt(nz['main'])}) albo kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(round(nz['breakout'] * 1.01, 4))}.")
+                L.append(f"Potem odkup {zone_txt(nz)} (limit {fmt(nz['limit'])}) albo kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(round(nz['breakout'] * 1.01, 4))}.")
             L.append("Po zamknięciu świecy 1h przyjdzie krótkie potwierdzenie.")
     elif k == "BUY":
         z = w["zone"]
@@ -191,12 +191,12 @@ def live_message(w, level, price, plan, btc=None, now_ts=None):
         if level == "near":
             title, pr, tg = ("Sonic zbliża się do strefy zakupu" if z["step"] == "start" else f"Sonic zbliża się do odkupu – po kroku {z['step']}"), 4, ["hourglass"]
             L[0] = L[0][:-1] + f" – {fp(pct(price, lim))} nad poziomem {fmt(lim)} (strefa {zone_txt(z)})."
-            L.append(f"Obserwuj. Zlecenie kupna z limitem ok. {fmt(lim if z['step'] == 'start' else z['main'])}.")
+            L.append(f"Obserwuj. Zlecenie kupna z limitem {fmt(z['limit'])}.")
         else:
             title, pr, tg = ("SONIC W STREFIE ZAKUPU – kup" if z["step"] == "start" else f"SONIC W STREFIE ODKUPU – po kroku {z['step']}"), 5, ["green_circle"]
-            L.append(f"Strefa {zone_txt(z)}. Kup z limitem ok. {fmt(lim if z['step'] == 'start' else z['main'])}.")
+            L.append(f"Strefa {zone_txt(z)}. Kup z limitem {fmt(z['limit'])}.")
             if t:
-                L.append(f"Od razu potem: sprzedaż z limitem {t['label']} {fmt(t['main'])} (widełki {zone_txt(t)}).")
+                L.append(f"Od razu potem: sprzedaż z limitem {t['label']} {fmt(t['limit'])} (widełki {zone_txt(t)}).")
             L.append("Po zamknięciu świecy 1h przyjdzie krótkie potwierdzenie.")
     elif k == "BO_WATCH":
         z = w["zone"]
@@ -216,7 +216,7 @@ def live_message(w, level, price, plan, btc=None, now_ts=None):
         title = f"Odkup po kroku pośrednim {m['id']}" + (" – zbliża się" if level == "near" else "")
         pr, tg = (3, ["hourglass"]) if level == "near" else (4, ["large_blue_diamond"])
         L.append(f"Dotyczy tylko sytuacji, gdy sprzedałeś na kroku pośrednim ({fmt(m['main'])}). Strefa odkupu {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])}, "
-                 f"limit ok. {fmt(m['rebuy'])}.")
+                 f"limit {fmt(m['rebuy_limit'])}.")
     else:
         title, pr, tg = k, 3, []
     bl = btc_line(btc)
