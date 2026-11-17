@@ -23,8 +23,8 @@ Niezależnie od tego: przy wysokim ryzyku silnego spadku BTC, który pociągną�
 ## 3a. Zasada: odbicie w przebity poziom
 Jeśli BTC (albo Sonic) przebił wsparcie i teraz odbija z powrotem do tego poziomu (przebita podstawa = opór), NIE sugeruj zakupu w trakcie takiego odbicia. Napisz wprost: „to odbicie w opór X – nie wchodź przed zamknięciem 1h nad X albo poczekaj na powrót do dołka Y”. Takie odbicia są zwykle sprzedawane (np. 17.11.2026: BTC przebił 64 000, odbił z 63 336 do 64 483, dokładnie w przebitą podstawę 64 250–64 500, i znów spadł). Tę samą zasadę stosuj w każdej odpowiedzi na żywo.
 
-## 4. Makro
-Krótkie wyszukiwanie w sieci z bieżącą datą: Fed/stopy, dane z USA, przepływy do ETF, ważne wiadomości o Sonicu/Sonic Labs z ostatniej doby.
+## 4. Makro i tło rynku
+Krótkie wyszukiwanie w sieci z bieżącą datą: Fed/stopy, dane z USA, przepływy do ETF (napływy/odpływy z ostatnich dni), likwidacje na rynku kontraktów, podaż stablecoinów, ważne wiadomości o Sonicu/Sonic Labs z ostatniej doby. To tło podaj ZAWSZE, zanim ocenisz sensowność zakupu lub sprzedaży – nie dopiero po fakcie. Przy strefach likwidacji sprawdź datę źródła i czy cena już do nich doszła.
 
 ## 5. Odpowiedź
 Nagłówek: „Raport DD.MM.RRRR”. MAKSYMALNIE 10 krótkich zdań (12, jeśli w grze jest krok pośredni), bez tabel i długich list. Kolejność: BTC (stan, kierunek, kluczowy poziom) → Sonic względem planu (cena, najbliższy poziom, odległość w %) → czy wykresy i momentum potwierdzają bota → makro → krok pośredni (tylko gdy w pobliżu) → na co uważać dziś. Konkretne poziomy, gdzie ma sens – prawdopodobieństwa. Ostatnie zdanie: „To nie jest rekomendacja. Nie jestem doradcą finansowym.”
