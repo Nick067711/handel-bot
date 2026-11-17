@@ -52,20 +52,24 @@ Opcjonalne zmienne (w `env:` workflow): `FTP_DIR` (domyślnie `domains/piwecki.p
 
 Actions → „Sonic & BTC – monitor i raport” → Run workflow. Domyślnie wymusza nowy raport HTML.
 
-## Sygnały ntfy (plan etapowy, świece 1h)
+## Sygnały ntfy (plan etapowy)
 
-Bot co godzinę (kilka minut po pełnej godzinie) odtwarza plan od chwili `start.from` z `data/sonic_plan.json`:
+Bot startuje co godzinę tuż po pełnej godzinie: odtwarza plan od `start.from` z `data/sonic_plan.json` na zamkniętych
+świecach 1h, a potem **czuwa na żywo do :56** – co minutę sprawdza cenę Sonica (środek bid/ask z Coinbase).
 
 | Sygnał | Kiedy |
 |---|---|
-| Przygotuj zakup / sprzedaż | zamknięta świeca 1h podeszła na 2% do widełek – czas wystawić zlecenie z limitem |
-| KUP / ODKUP | świeca 1h zeszła do limitu strefy (start) albo do górnej granicy widełek odkupu |
-| SPRZEDAJ | świeca 1h weszła w widełki sprzedaży kroku |
-| Kupno na wybiciu | odkup się nie wykonał, a 2 kolejne zamknięcia 1h są ≥1% powyżej poprzedniego celu |
+| Zbliża się do sprzedaży / zakupu (na żywo) | cena w trakcie świecy jest 2% od widełek – obserwuj, wystaw limit |
+| W WIDEŁKACH SPRZEDAŻY / W STREFIE ZAKUPU (na żywo) | cena właśnie weszła w widełki – sprzedaj / kup |
+| Potwierdzenie 1h | po zamknięciu świecy: zamknięcie pod / w / nad widełkami (odrzucenie albo siła) |
+| Krok pośredni (na żywo i 1h) | opór po drodze (0,0365, 0,0600, 0,0740) – decyzja na gorąco; podaje odkup i wybicie |
+| Odkup / wybicie po kroku pośrednim | tylko jeśli sprzedałeś na pośrednim |
+| Kupno na wybiciu | odkup się nie wykonał, 2 kolejne zamknięcia 1h ≥1% powyżej poprzedniego celu (przed tym ostrzeżenie na żywo) |
 | Odkup zawiódł | 2 zamknięcia 1h pod dolną granicą widełek, w których kupiliśmy |
 | Plan unieważniony | zamknięcie dnia poniżej 0,0300 |
 
-Każdy sygnał idzie raz. Wysyłane są tylko zdarzenia z ostatnich 3 godzin (opóźnienia GitHub Actions).
+Każdy sygnał idzie raz (ostrzeżenie i alert na żywo nie dublują się z sygnałami ze świec 1h).
+Kroki pośrednie nie zmieniają stanu planu – plan dalej trzyma pozycję do głównego celu.
 
 **Gdy sam kupisz lub sprzedasz inaczej niż plan**, ustaw w `data/sonic_plan.json` blok `start`:
 `"from"` – czas (UTC) od którego liczyć, `"phase"` – `BUY` (czekam na zakup) lub `HOLD` (mam Sonica),

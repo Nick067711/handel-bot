@@ -2,7 +2,7 @@ name: Sonic & BTC – monitor i raport
 
 on:
   schedule:
-    - cron: '3 * * * *'   # co godzinę, tuż po zamknięciu świecy 1h (GitHub potrafi opóźnić start o kilka–kilkanaście minut)
+    - cron: '1 * * * *'   # co godzinę, tuż po zamknięciu świecy 1h; potem czuwanie na żywo do :56 (GitHub potrafi opóźnić start)
   workflow_dispatch:
     inputs:
       force_report:
@@ -20,7 +20,7 @@ permissions:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 75
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,6 +44,7 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASS }}
+          LIVE_UNTIL_MINUTE: "56"   # po części godzinowej bot czuwa na żywo (co minutę) do :56
           FORCE_REPORT: ${{ github.event_name == 'workflow_dispatch' && inputs.force_report && '1' || '0' }}
           PYTHONIOENCODING: "utf-8"
           LANG: "C.UTF-8"

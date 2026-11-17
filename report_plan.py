@@ -35,8 +35,23 @@ def step_status(pc):
     cur_sell = (st.get("target") or {}).get("step") if st["phase"] == "HOLD" else None
     cur_buy = (st.get("zone") or {}).get("step") if st["phase"] == "BUY" else None
     out = {}
+    mid_ev = {}
+    for e in pc["events"]:
+        if e["kind"] in ("MID_SELL", "MID_REBUY", "MID_BREAKOUT"):
+            mid_ev[e["step"]] = e["kind"]
+    active_mids = {m["id"]: m["status"] for m in (st.get("mids") or [])}
     for s in pc["plan"]["steps"]:
         i = s["id"]
+        if s.get("intermediate"):
+            if active_mids.get(i) == "pending":
+                out[i] = "pośredni-czeka"
+            elif active_mids.get(i) == "touched":
+                out[i] = "pośredni-dotknięty"
+            elif i in mid_ev:
+                out[i] = "pośredni-minięty"
+            else:
+                out[i] = "przyszły"
+            continue
         if i == cur_sell:
             out[i] = "teraz-sprzedaż"
         elif i == cur_buy:
@@ -170,7 +185,7 @@ def projection_chart_svg(pc, sonic, mobile=False):
             continue
         cur = (p["kind"] == "top" and status.get(p["step"]) == "teraz-sprzedaż") or \
               (p["kind"] == "bottom" and status.get(p["step"]) == "teraz-odkup")
-        cls = {"top": "z-sell", "bottom": "z-buy"}[p["kind"]] + (" z-cur" if cur else "")
+        cls = {"top": "z-sell", "bottom": "z-buy"}[p["kind"]] + (" z-cur" if cur else "") + (" z-mid" if p.get("mid") else "")
         half = (2.5 * DAY) if p["t"] < t_mid else 14 * DAY
         x1, x2 = lx(p["t"] - half), lx(p["t"] + half)
         y1, y2 = ly(p["hi"]), ly(p["lo"])
@@ -229,6 +244,13 @@ def projection_chart_svg(pc, sonic, mobile=False):
             P.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{4 if mobile else 3}" class="chk-dot"><title>Przystanek SMA100 {fmt(p["price"])}</title></circle>')
             continue
         top = p["kind"] == "top"
+        if p.get("mid"):
+            P.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{4 if mobile else 3}" class="{"pt-mtop" if top else "pt-mbot"}">'
+                     f'<title>Krok pośredni {E(p["label"])} – {"sprzedaż (decyzja na gorąco)" if top else "odkup"} {fmt(p["price"])} '
+                     f'(widełki {fmt(p["lo"])}–{fmt(p["hi"])}), ok. {d_full(p["t"])}</title></circle>')
+            if top and not mobile:
+                T.append((x, y - sm - 6, [(f"pośr. {fmt(p['price'])}", "lbl-mid", sm)], "middle", -1, (x, y)))
+            continue
         lab.block(x - 4, y - 4, x + 4, y + 4)
         P.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{5 if mobile else 4}" class="{"pt-top" if top else "pt-bot"}">'
                  f'<title>{E(p["label"])} – {"sprzedaż" if top else "odkup"} {fmt(p["price"])} (widełki {fmt(p["lo"])}–{fmt(p["hi"])}), ok. {d_full(p["t"])}</title></circle>')
@@ -277,7 +299,8 @@ def projection_chart_svg(pc, sonic, mobile=False):
 
 
 # ----------------------------------------------------------------- tabela kroków
-STATUS_LABEL = {"teraz-sprzedaż": ("teraz: czekamy na sprzedaż", "cur"), "teraz-odkup": ("teraz: czekamy na odkup", "cur"),
+STATUS_LABEL = {"pośredni-czeka": ("pośredni – obserwujemy", "mid"), "pośredni-dotknięty": ("pośredni – dotknięty, czeka odkup/wybicie", "mid"),
+                "pośredni-minięty": ("pośredni – minięty", "done"), "teraz-sprzedaż": ("teraz: czekamy na sprzedaż", "cur"), "teraz-odkup": ("teraz: czekamy na odkup", "cur"),
                 "teraz-zakup": ("teraz: akumulacja", "cur"), "zrealizowany": ("zrealizowany", "done"),
                 "sprzedano": ("sprzedano", "done"), "kupiono": ("kupiono", "done"), "przyszły": ("", "fut")}
 
@@ -302,8 +325,11 @@ def steps_table(pc):
             reta = d_full(date_ts(s["rebuy_eta"])) if s.get("rebuy_eta") else ""
             if s.get("optimistic"):
                 reb = f"<span class='muted'>optymistycznie {fmt(s['optimistic'][0])}–{fmt(s['optimistic'][1])}</span>"
+        if s.get("intermediate"):
+            sell = f"<span class='midtag'>pośredni</span> {fmt(s['sell'])} <span class='muted'>({fmt(s['sell_range'][0])}–{fmt(s['sell_range'][1])})</span>"
+            reb = f"{fmt(s['rebuy'])} <span class='muted'>({fmt(s['rebuy_range'][0])}–{fmt(s['rebuy_range'][1])}), wybicie {fmt(s['breakout'])}</span>"
         note = s.get("rebuy_note") or s.get("note") or s.get("condition") or ""
-        rows.append(f"<tr class='st-{cls}'><td><b>{E(s['label'])}</b>{f'<br><span class=muted>{E(note)}</span>' if note else ''}</td>"
+        rows.append(f"<tr class='st-{cls}{' midrow' if s.get('intermediate') else ''}'><td><b>{E(s['label'])}</b>{f'<br><span class=muted>{E(note)}</span>' if note else ''}</td>"
                     f"<td>{sell}</td><td class='n'>{eta}</td><td>{reb}</td><td class='n'>{reta}</td>"
                     f"<td>{f'<span class=badge-{cls}>{E(lab)}</span>' if lab else ''}</td></tr>")
     return ("<div class='tablewrap'><table class='steps'><thead><tr><th>Krok</th><th>Sprzedaż (widełki)</th><th class='n'>ok. data</th>"
@@ -311,7 +337,7 @@ def steps_table(pc):
 
 
 # ----------------------------------------------------------------- „gdzie jesteśmy”
-KIND_PL = {"BUY": "zakup", "BUY_BREAKOUT": "kupno na wybiciu", "SELL": "sprzedaż", "PREP_SELL": "przygotuj sprzedaż",
+KIND_PL = {"MID_SELL": "krok pośredni – strefa", "MID_REBUY": "odkup po pośrednim", "MID_BREAKOUT": "wybicie nad pośrednim", "PREP_MID": "zbliża się do pośredniego", "BUY": "zakup", "BUY_BREAKOUT": "kupno na wybiciu", "SELL": "sprzedaż", "PREP_SELL": "przygotuj sprzedaż",
            "PREP_BUY": "przygotuj zakup", "STEP_FAIL": "odkup zawiódł", "INVALID": "plan unieważniony"}
 
 
@@ -332,13 +358,18 @@ def where_block(pc):
             kv.append(("Kupno na wybiciu", f"2 zamknięcia 1h powyżej {fmt(z['breakout'])} ({fpc(pct(z['breakout'], price))})"))
     if t:
         kv.append(("Następna sprzedaż", f"{E(t['label'])}: {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}, {fpc(pct(t['lo'], price))} do widełek)"))
+    for m in st.get("mids") or []:
+        if m["status"] == "pending":
+            kv.append((f"Krok pośredni {E(m['id'])}", f"{fmt(m['main'])} (widełki {fmt(m['lo'])}–{fmt(m['hi'])}, {fpc(pct(m['lo'], price))}) – decyzja na gorąco"))
+        elif m["status"] == "touched":
+            kv.append((f"Po pośrednim {E(m['id'])}", f"jeśli sprzedałeś: odkup {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} albo wybicie nad {fmt(m['breakout'])}"))
     kv.append(("Do szczytu etapu 1 / 2", f"{fpc(pos['to_stage1_top_pct'])} / {fpc(pos['to_stage2_top_pct'])}"))
     kv.append(("Do unieważnienia planu", f"{fpc(pct(inv, price))} (zamknięcie dnia poniżej {fmt(inv)})"))
     bars = "".join(
         f"<div class='meter'><p>{E(name)}: <strong>{v:.0f}%</strong> drogi (skala log.)</p><div class='mtrack'><div class='mfill' style='width:{v:.0f}%'></div></div></div>"
         for name, v in (("Etap 1: od strefy zakupu do szczytu 0,071", pos["progress_stage1"]),
                         ("Etap 2: od strefy zakupu do szczytu 0,120", pos["progress_stage2"])))
-    ev = [e for e in pc["events"] if e["kind"] != "PREP_BUY" and e["kind"] != "PREP_SELL"][-6:][::-1]
+    ev = [e for e in pc["events"] if not e["kind"].startswith("PREP")][-6:][::-1]
     evh = "".join(f"<li><b>{E(KIND_PL.get(e['kind'], e['kind']))}</b> {E(str(e.get('step') or ''))} – {pl_time(e['t'])}, cena {fmt(e['price'])}</li>" for e in ev)
     conf = "".join(f"<li class='{'ok' if c['ok'] else 'no'}'><span class='mk' aria-hidden='true'>{'✓' if c['ok'] else '✗'}</span>"
                    f"<span>{E(c['name'])}</span></li>" for c in (pc.get("confirm") or {}).get("items", []))
@@ -396,7 +427,10 @@ PLAN_CSS = """
 .pmap .proj-line{fill:none;stroke:var(--sonic);stroke-width:2;stroke-dasharray:7 5;opacity:.75;stroke-linejoin:round}
 .pmap .hk-dot{fill:var(--sonic);stroke:var(--panel);stroke-width:2}.pmap text{font-variant-numeric:tabular-nums}.pmap .hk-t{fill:var(--text);font-weight:600}
 .pmap .pt-top{fill:var(--neg);stroke:var(--panel);stroke-width:2}.pmap .pt-bot{fill:var(--pos);stroke:var(--panel);stroke-width:2}
-.pmap .chk-dot{fill:var(--muted)}.pmap .lbl-top{fill:#F2A29C;font-weight:600}.pmap .lbl-bot{fill:#8FDDC4;font-weight:600}.pmap .lbl-m{fill:var(--muted)}
+.pmap .chk-dot{fill:var(--muted)}.pmap .z-mid{opacity:.10;stroke:var(--warn);stroke-dasharray:3 3;stroke-width:1}
+.pmap .pt-mtop,.pmap .pt-mbot{fill:var(--panel);stroke:var(--warn);stroke-width:1.5}.pmap .lbl-mid{fill:var(--warn)}
+.midtag{color:var(--warn);font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+table.steps tr.midrow td{font-size:.9em}.badge-mid{color:var(--warn);font-weight:600;font-size:.86rem}.pmap .lbl-top{fill:#F2A29C;font-weight:600}.pmap .lbl-bot{fill:#8FDDC4;font-weight:600}.pmap .lbl-m{fill:var(--muted)}
 .pmap .now-v{stroke:var(--sonic);stroke-width:1;opacity:.5}.pmap .now-ring{fill:none;stroke:var(--sonic);stroke-width:2}
 .pmap .now-dot{fill:var(--sonic)}.pmap .now-t{fill:var(--sonic)}.pmap .tick{stroke:var(--muted)}
 .pmap rect:hover,.pmap circle:hover{opacity:.9}
@@ -408,14 +442,14 @@ table.steps td{vertical-align:top}table.steps tr.st-cur td{background:rgba(92,20
 .plan-legend{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:.85rem;margin:4px 0 0;padding:0;list-style:none}
 .plan-legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 .plan-legend .l-h{height:3px;background:var(--sonic)}.plan-legend .l-p{height:0;border-top:2px dashed var(--sonic)}
-.plan-legend .l-s{background:var(--neg);opacity:.5}.plan-legend .l-b{background:var(--pos);opacity:.5}.plan-legend .l-i{height:0;border-top:2px dashed var(--neg)}
+.plan-legend .l-m{border:1.5px dashed var(--warn);background:none}.plan-legend .l-s{background:var(--neg);opacity:.5}.plan-legend .l-b{background:var(--pos);opacity:.5}.plan-legend .l-i{height:0;border-top:2px dashed var(--neg)}
 """
 
 
 def plan_section(pc, sonic):
     leg = ("<ul class='plan-legend'><li><i class='l-h'></i>cena (zamknięcia dzienne)</li><li><i class='l-p'></i>prognoza wg planu</li>"
            "<li><i class='l-s'></i>widełki sprzedaży</li><li><i class='l-b'></i>widełki zakupu/odkupu</li>"
-           "<li><i class='l-i'></i>unieważnienie planu</li><li>mocniej podświetlona strefa = bieżący krok</li></ul>")
+           "<li><i class='l-m'></i>krok pośredni (decyzja na gorąco)</li><li><i class='l-i'></i>unieważnienie planu</li><li>mocniej podświetlona strefa = bieżący krok</li></ul>")
     meta = pc["plan"]["meta"]
     return (f"<h3>Mapa planu: historia od sierpnia 2026 i prognoza</h3>"
             f"<p class='muted'>{E(meta['basis'])} {E(meta['tempo_note'])}</p>"
@@ -424,4 +458,6 @@ def plan_section(pc, sonic):
             f"<h3>Kroki planu</h3>{steps_table(pc)}"
             "<p class='muted'>Sprzedaż: zlecenie z limitem w dolnej części widełek, a gdy cena w widełkach zawraca – bez czekania na górną granicę. "
             "Odkup: limit w górnej części widełek. Gdy odkup się nie wykona: kupno na wybiciu po 2 zamknięciach 1h powyżej poprzedniego celu. "
-            "Na ntfy idą tylko te sygnały, potwierdzone zamkniętą świecą 1h.</p>")
+            "Kroki pośrednie (żółte) to opory po drodze: bot ostrzega, a decyzję o sprzedaży podejmujesz na gorąco, patrząc, czy cena zawraca. "
+            "Na ntfy: ostrzeżenie, gdy cena jest 2% od poziomu, i alert w chwili wejścia w widełki (czuwanie co minutę w trakcie świecy), "
+            "potem krótkie potwierdzenie po zamknięciu świecy 1h.</p>")

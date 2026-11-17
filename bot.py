@@ -15,7 +15,7 @@ Co robi przy każdym uruchomieniu:
      a potem wysyła index.html na FTP (plus kopię w archiwum).
 Stan (wysłane sygnały, data raportu) jest trzymany na FTP poza public_html, bo runner GitHub Actions jest za każdym razem czysty.
 """
-import os, io, sys, json, html, ftplib, asyncio, urllib.parse, urllib.request
+import os, io, sys, json, html, time, ftplib, asyncio, urllib.parse, urllib.request
 from datetime import datetime, timezone, timedelta
 
 import aiohttp
@@ -41,6 +41,7 @@ REPORT_HOUR_UTC = int(os.getenv("REPORT_HOUR_UTC", "5"))       # raport dzienny 
 FORCE_REPORT = os.getenv("FORCE_REPORT", "0") == "1"           # ręczne uruchomienie z GitHuba wymusza raport
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"                     # test lokalny: bez FTP i ntfy, raport do pliku
 STATE_FILE = "sonic_bot_state.json"
+LIVE_UNTIL_MINUTE = int(os.getenv("LIVE_UNTIL_MINUTE", "0"))   # >0: po części godzinowej czuwaj na żywo do tej minuty godziny
 REPO_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "raport")   # kopia wyników w repozytorium (commit robi workflow)
 
 
@@ -398,16 +399,25 @@ async def main():
     if btc_ctx:
         btc_ctx["price"] = btc_now
     log = []
+    sent_cls = set(state.get("sent_cls") or [])
     for e in new:
-        if N.send_event(e, plan, btc_ctx, click=REPORT_URL, dry_run=DRY_RUN):
+        ck, lvl = P.event_class_key(plan, e)
+        confirm = False
+        if ck and lvl == "near" and (ck + ":near" in sent_cls or ck + ":hit" in sent_cls):
+            sent.add(N.key(e))            # ostrzeżenie już poszło na żywo
+            continue
+        if ck and lvl == "hit" and ck + ":hit" in sent_cls:
+            confirm = True                # alert na żywo już był – teraz tylko potwierdzenie z zamkniętej świecy
+        ok, title, body = N.send_event(e, plan, btc_ctx, click=REPORT_URL, dry_run=DRY_RUN, confirm=confirm)
+        if ok:
             sent.add(N.key(e))
-            title, body = N.message(e, plan, btc_ctx)
-            log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ=e["kind"], krok=e.get("step"),
-                            cena=e["price"], tytul=title, tresc=body))
+            if ck:
+                sent_cls.add(f"{ck}:{lvl}")
+            log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ="CONFIRM" if confirm else e["kind"],
+                            krok=e.get("step"), cena=e["price"], tytul=title, tresc=body))
             state["signals"] = (state.get("signals") or [])[-99:] + [dict(kind=e["kind"], step=e.get("step"), t=e["t"],
                                                                          price=e["price"], sent_at=now.isoformat())]
-    if log:
-        append_signals_log(log)
+    state["sent_cls"] = sorted(sent_cls)[-400:]
     state["ntfy_sent"] = sorted(sent, key=lambda k: int(k.rsplit(":", 1)[-1]))[-300:]
     state["plan_phase"] = pst["phase"]
 
@@ -446,8 +456,52 @@ async def main():
     ok = publish(state, html_doc, archive)
     if html_doc and not ok:
         state["last_report_date"] = None   # spróbuj ponownie przy następnym uruchomieniu
+        if log:
+            append_signals_log(log)
         sys.exit(1)
+
+    # --- czuwanie na żywo do końca godziny (sygnały w trakcie budowania świecy 1h)
+    if LIVE_UNTIL_MINUTE and fresh_1h and pst["phase"] in ("BUY", "HOLD"):
+        hour0 = now_ts - now_ts % 3600
+        deadline = hour0 + LIVE_UNTIL_MINUTE * 60
+        if time.time() < deadline - 60:
+            await live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx)
+    if log:
+        append_signals_log(log)
     print("Koniec cyklu.")
+
+
+async def live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx):
+    """Co ok. minutę sprawdza cenę Sonica (środek bid/ask z Coinbase) względem poziomów bieżącego kroku planu."""
+    poll = plan["signal_rules"].get("live_poll_seconds", 60)
+    watches = P.live_watches(plan, pst)
+    print(f"[live] czuwam do {datetime.fromtimestamp(deadline, timezone.utc):%H:%M} UTC, poziomy: "
+          + ", ".join(f"{w['kind']} {w['step']} @{P.fmt(w['level'])}" for w in watches))
+    errs, last_btc, n = {}, 0.0, 0
+    async with aiohttp.ClientSession() as session:
+        while time.time() < deadline:
+            t = await M.safe(M.coinbase_ticker(session, "S-USD"), "Coinbase S-USD ticker (live)", errs)
+            if t:
+                price = (t["bid"] + t["ask"]) / 2 if t.get("bid") and t.get("ask") else t["price"]
+                n += 1
+                alerts = P.live_check(plan, pst, price, sent_cls)
+                if alerts:
+                    if time.time() - last_btc > 300:
+                        bp = await fetch_btc_price(session, errs)
+                        if bp:
+                            btc_ctx = P.btc_position(plan, bp, (btc_ctx or {}).get("sma200"))
+                            btc_ctx["price"] = bp
+                            last_btc = time.time()
+                    for key, lvl, w in alerts:
+                        title, body, pr, tg = N.live_message(w, lvl, price, plan, btc_ctx)
+                        if N.send(title, body, pr, tg, REPORT_URL, DRY_RUN):
+                            sent_cls.add(key)
+                            log.append(dict(wyslano=datetime.now(timezone.utc).isoformat(), czas_swiecy_pl="na żywo",
+                                            typ=f"LIVE_{w['kind']}_{lvl.upper()}", krok=w["step"], cena=price, tytul=title, tresc=body))
+                    state["sent_cls"] = sorted(sent_cls)[-400:]
+                    publish(state)        # zapisz od razu, żeby kolejne uruchomienie nie powtórzyło alertu
+            await asyncio.sleep(poll)
+    print(f"[live] koniec czuwania, sprawdzeń ceny: {n}")
 
 
 if __name__ == "__main__":

@@ -20,10 +20,14 @@ NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh").rstrip("/")
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
 
-PRIORITY = {"INVALID": 5, "SELL": 5, "BUY": 5, "BUY_BREAKOUT": 5, "STEP_FAIL": 4, "PREP_SELL": 4, "PREP_BUY": 4}
+PRIORITY = {"INVALID": 5, "SELL": 5, "BUY": 5, "BUY_BREAKOUT": 5, "STEP_FAIL": 4, "PREP_SELL": 4, "PREP_BUY": 4,
+            "PREP_MID": 3, "MID_SELL": 4, "MID_REBUY": 4, "MID_BREAKOUT": 4, "CONFIRM": 3}
 TAGS = {"INVALID": ["no_entry"], "SELL": ["red_circle"], "BUY": ["green_circle"], "BUY_BREAKOUT": ["rocket"],
-        "STEP_FAIL": ["warning"], "PREP_SELL": ["hourglass"], "PREP_BUY": ["hourglass"]}
-STRENGTH = {"PREP_SELL": 1, "PREP_BUY": 1, "SELL": 2, "BUY": 2, "BUY_BREAKOUT": 2, "STEP_FAIL": 2, "INVALID": 3}
+        "STEP_FAIL": ["warning"], "PREP_SELL": ["hourglass"], "PREP_BUY": ["hourglass"], "PREP_MID": ["eyes"],
+        "MID_SELL": ["large_orange_diamond"], "MID_REBUY": ["large_blue_diamond"], "MID_BREAKOUT": ["large_blue_diamond"],
+        "CONFIRM": ["white_check_mark"]}
+STRENGTH = {"PREP_SELL": 1, "PREP_BUY": 1, "PREP_MID": 1, "SELL": 2, "BUY": 2, "BUY_BREAKOUT": 2, "STEP_FAIL": 2, "INVALID": 3,
+            "MID_SELL": 2, "MID_REBUY": 2, "MID_BREAKOUT": 2}
 
 
 def pl_time(ts):
@@ -108,6 +112,27 @@ def message(e, plan, btc=None):
         lines.append(f"Dwa zamknięcia 1h poniżej {fmt(z['lo'])} (ostatnie {when}, {fmt(e['price'])}).")
         lines.append(f"Nie dokupuj. Następne wsparcie z mapy: {fmt(s.get('lo'))}–{fmt(s.get('hi'))}. "
                      f"Plan obowiązuje, dopóki zamknięcie dnia jest powyżej {fmt(inv)}.")
+    elif k in ("PREP_MID", "MID_SELL"):
+        m = e["mid"]
+        title = (f"Krok pośredni: Sonic blisko {fmt(m['main'])}" if k == "PREP_MID" else f"KROK POŚREDNI – Sonic w strefie {fmt(m['lo'])}–{fmt(m['hi'])}")
+        lines.append(f"Świeca 1h zamknięta {when}: szczyt {fmt(e.get('high'))}, cena {fmt(e['price'])}. {m['label']}: widełki {fmt(m['lo'])}–{fmt(m['hi'])}.")
+        lines += mid_advice(m, t)
+    elif k == "MID_REBUY":
+        m = e["mid"]
+        title = f"Odkup po kroku pośrednim {m['id']}"
+        lines.append(f"Jeśli sprzedałeś na kroku pośrednim ({fmt(m['main'])}): świeca 1h zamknięta {when} zeszła do strefy odkupu "
+                     f"{fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} (dołek {fmt(e.get('low'))}). Kup z limitem ok. {fmt(m['rebuy'])}.")
+        if t:
+            lines.append(f"Główny cel bez zmian: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+        lines.append("Jeśli nie sprzedawałeś – nic nie rób, plan trzyma pozycję.")
+    elif k == "MID_BREAKOUT":
+        m = e["mid"]
+        title = f"Wybicie nad krokiem pośrednim {m['id']}"
+        lines.append(f"Jeśli sprzedałeś na {fmt(m['main'])}: 2 zamknięcia 1h powyżej {fmt(m['breakout'])} (ostatnie {when}, {fmt(e['price'])}) – "
+                     f"odkup na wybiciu, żeby nie zostać bez pozycji.")
+        if t:
+            lines.append(f"Główny cel: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+        lines.append("Jeśli nie sprzedawałeś – nic nie rób.")
     elif k == "INVALID":
         title = "PLAN UNIEWAŻNIONY – Sonic"
         nx = plan["invalidation"]["next_supports"]
@@ -115,6 +140,116 @@ def message(e, plan, btc=None):
         lines.append(f"Kolejne wsparcia: {', '.join(fmt(x) for x in nx)}. Nowy plan po analizie.")
     else:
         title, lines = k, [str(e)]
+    bl = btc_line(btc)
+    if bl:
+        lines.append(bl)
+    return title, "\n".join(lines)
+
+
+def mid_advice(m, t):
+    out = ["To krok POŚREDNI – decyzja na gorąco: spójrz na wykres 15m/1h. Sprzedaj tylko, jeśli cena wyraźnie zawraca "
+           "(długi górny knot, kolejne niższe świece). Jeśli rośnie z impetem – trzymaj do głównego celu."]
+    out.append(f"Jeśli sprzedasz: odkup {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} (limit ok. {fmt(m['rebuy'])}) "
+               f"albo kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(round(m['breakout'] * 1.01, 4))}.")
+    if m.get("note"):
+        out.append(m["note"])
+    if t:
+        out.append(f"Główny cel planu: {t['label']} {fmt(t['main'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
+    return out
+
+
+def zone_txt(z):
+    return f"{fmt(z['lo'])}–{fmt(z['hi'])}"
+
+
+def live_message(w, level, price, plan, btc=None, now_ts=None):
+    """Alert na żywo (świeca 1h w trakcie). Zwraca (tytuł, treść, priorytet, tagi)."""
+    import time
+    when = pl_time(now_ts or int(time.time()))
+    k, t = w["kind"], w.get("target")
+    L = [f"Teraz {fmt(price)} ({when}, świeca 1h w trakcie)."]
+    if k == "SELL":
+        if level == "near":
+            title, pr, tg = f"Sonic zbliża się do sprzedaży – {t['label']}", 4, ["hourglass"]
+            L[0] = L[0][:-1] + f" – {fp(abs(pct(t['lo'], price)))} pod widełkami {zone_txt(t)}."
+            L.append(f"Obserwuj. Jeśli nie masz jeszcze zlecenia: sprzedaż z limitem {fmt(t['main'])} albo od {fmt(t['lo'])} (dolna część widełek).")
+        else:
+            title, pr, tg = f"SONIC W WIDEŁKACH SPRZEDAŻY – {t['label']}", 5, ["red_circle"]
+            L.append(f"Widełki {zone_txt(t)}, główny poziom {fmt(t['main'])}. Sprzedaj w dolnej części widełek; jeśli cena zawraca – nie czekaj.")
+            nz = None
+            try:
+                from plan import buy_zone
+                nz = buy_zone(plan, t["step"])
+            except Exception:
+                pass
+            if nz:
+                L.append(f"Potem odkup {zone_txt(nz)} (limit ok. {fmt(nz['main'])}) albo kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(round(nz['breakout'] * 1.01, 4))}.")
+            L.append("Po zamknięciu świecy 1h przyjdzie krótkie potwierdzenie.")
+    elif k == "BUY":
+        z = w["zone"]
+        lim = z["trigger"]
+        if level == "near":
+            title, pr, tg = ("Sonic zbliża się do strefy zakupu" if z["step"] == "start" else f"Sonic zbliża się do odkupu – po kroku {z['step']}"), 4, ["hourglass"]
+            L[0] = L[0][:-1] + f" – {fp(pct(price, lim))} nad poziomem {fmt(lim)} (strefa {zone_txt(z)})."
+            L.append(f"Obserwuj. Zlecenie kupna z limitem ok. {fmt(lim if z['step'] == 'start' else z['main'])}.")
+        else:
+            title, pr, tg = ("SONIC W STREFIE ZAKUPU – kup" if z["step"] == "start" else f"SONIC W STREFIE ODKUPU – po kroku {z['step']}"), 5, ["green_circle"]
+            L.append(f"Strefa {zone_txt(z)}. Kup z limitem ok. {fmt(lim if z['step'] == 'start' else z['main'])}.")
+            if t:
+                L.append(f"Od razu potem: sprzedaż z limitem {t['label']} {fmt(t['main'])} (widełki {zone_txt(t)}).")
+            L.append("Po zamknięciu świecy 1h przyjdzie krótkie potwierdzenie.")
+    elif k == "BO_WATCH":
+        z = w["zone"]
+        title, pr, tg = f"Sonic przebija {fmt(z['breakout'])} – możliwe kupno na wybiciu", 4, ["eyes"]
+        L.append(f"Zakup w strefie {zone_txt(z)} się nie wykonał. Plan: kupno na wybiciu po 2 zamknięciach 1h powyżej {fmt(round(z['breakout'] * 1.01, 4))} "
+                 f"– przyjdzie osobny sygnał. Obserwuj; możesz wcześniej ustawić stop-buy tuż nad ceną.")
+    elif k == "MID":
+        m = w["mid"]
+        if level == "near":
+            title, pr, tg = f"Krok pośredni: Sonic zbliża się do {fmt(m['main'])}", 3, ["eyes"]
+            L[0] = L[0][:-1] + f" – {fp(abs(pct(m['lo'], price)))} pod strefą {fmt(m['lo'])}–{fmt(m['hi'])}."
+        else:
+            title, pr, tg = f"KROK POŚREDNI – Sonic w strefie {fmt(m['lo'])}–{fmt(m['hi'])}", 4, ["large_orange_diamond"]
+        L += mid_advice(m, t)
+    elif k == "MID_REBUY":
+        m = w["mid"]
+        title = f"Odkup po kroku pośrednim {m['id']}" + (" – zbliża się" if level == "near" else "")
+        pr, tg = (3, ["hourglass"]) if level == "near" else (4, ["large_blue_diamond"])
+        L.append(f"Dotyczy tylko sytuacji, gdy sprzedałeś na kroku pośrednim ({fmt(m['main'])}). Strefa odkupu {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])}, "
+                 f"limit ok. {fmt(m['rebuy'])}.")
+    else:
+        title, pr, tg = k, 3, []
+    bl = btc_line(btc)
+    if bl:
+        L.append(bl)
+    return title, "\n".join(L), pr, tg
+
+
+def confirm_message(e, plan, btc=None):
+    """Krótkie potwierdzenie po zamknięciu świecy 1h, gdy alert na żywo już poszedł."""
+    k = e["kind"]; when = pl_time(e["t"]); c = e["price"]
+    if k in ("SELL", "MID_SELL"):
+        z = e["target"] if k == "SELL" else e["mid"]
+        name = z["label"]
+        if c < z["lo"]:
+            verdict = f"dotknęła widełek (szczyt {fmt(e.get('high'))}) i zamknęła się POD nimi ({fmt(c)}) – odrzucenie, sprzedaż potwierdzona."
+        elif c <= z["hi"]:
+            verdict = f"zamknęła się W widełkach ({fmt(c)}). Jeśli jeszcze trzymasz – sprzedawaj w widełkach."
+        else:
+            verdict = f"zamknęła się NAD widełkami ({fmt(c)}) – silne wybicie. Jeśli sprzedałeś: odkup albo kupno na wybiciu wg planu."
+        title = f"Potwierdzenie 1h – {name}"
+    elif k in ("BUY", "MID_REBUY"):
+        z = e["zone"] if k == "BUY" else dict(lo=e["mid"]["rebuy_lo"], hi=e["mid"]["rebuy_hi"])
+        if c < z["lo"]:
+            verdict = f"zamknęła się POD strefą ({fmt(c)}) – presja podaży; nie dokładaj, plan obowiązuje do zamknięcia dnia poniżej {fmt(plan['invalidation']['daily_close_below'])}."
+        elif c <= z["hi"]:
+            verdict = f"zamknęła się w strefie ({fmt(c)}, dołek {fmt(e.get('low'))})."
+        else:
+            verdict = f"zamknęła się nad strefą ({fmt(c)}, dołek {fmt(e.get('low'))}) – popyt odbił cenę."
+        title = "Potwierdzenie 1h – zakup" if k == "BUY" else f"Potwierdzenie 1h – odkup po {e['mid']['id']}"
+    else:
+        return message(e, plan, btc)
+    lines = [f"Świeca 1h zamknięta {when} " + verdict]
     bl = btc_line(btc)
     if bl:
         lines.append(bl)
@@ -156,6 +291,9 @@ def send(title, body, priority=4, tags=None, click=None, dry_run=False):
         return False
 
 
-def send_event(e, plan, btc=None, click=None, dry_run=False):
+def send_event(e, plan, btc=None, click=None, dry_run=False, confirm=False):
+    if confirm:
+        title, body = confirm_message(e, plan, btc)
+        return send(title, body, PRIORITY["CONFIRM"], TAGS["CONFIRM"], click, dry_run), title, body
     title, body = message(e, plan, btc)
-    return send(title, body, PRIORITY.get(e["kind"], 3), TAGS.get(e["kind"]), click, dry_run)
+    return send(title, body, PRIORITY.get(e["kind"], 3), TAGS.get(e["kind"]), click, dry_run), title, body
