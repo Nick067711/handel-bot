@@ -19,7 +19,10 @@ DEGREE_WEIGHT = {"cykl": 4, "glowny": 3, "posredni": 2, "drobny": 1}
 def _plan_levels():
     try:
         import plan as P
-        return [dict(price=l["price"], name=l["name"]) for l in P.all_levels(P.load_plan()) if l["kind"] != "invalid"]
+        pl = P.load_plan()
+        mids = pl["signal_rules"].get("intermediate_alerts", True)
+        return [dict(price=l["price"], name=l["name"]) for l in P.all_levels(pl)
+                if l["kind"] != "invalid" and (mids or l["kind"] not in ("mid", "midbuy"))]
     except Exception as e:
         print(f"[plan] nie wczytano poziomów planu: {e}")
         return []

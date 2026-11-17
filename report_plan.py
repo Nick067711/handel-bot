@@ -27,6 +27,10 @@ MONTHS = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź",
 
 
 # ----------------------------------------------------------------- status kroków z odtworzonych zdarzeń
+def show_mids(pc):
+    return pc["plan"]["signal_rules"].get("intermediate_alerts", True)
+
+
 def step_status(pc):
     """id kroku -> 'sprzedano' / 'odkupiono' / 'teraz-sprzedaż' / 'teraz-odkup' / 'przyszły'."""
     st = pc["state"]
@@ -122,7 +126,7 @@ def projection_chart_svg(pc, sonic, mobile=False):
     t_now = hist[-1]["t"] + DAY
     t_mid = date_ts("2027-03-12")
     t_end = date_ts("2027-11-05")
-    path = pc["path"]
+    path = [p for p in pc["path"] if show_mids(pc) or not p.get("mid")]
     status = step_status(pc)
 
     W, Hh = (640, 900) if mobile else (1040, 660)
@@ -309,6 +313,8 @@ def steps_table(pc):
     st = step_status(pc)
     rows = []
     for s in pc["plan"]["steps"]:
+        if s.get("intermediate") and not show_mids(pc):
+            continue
         lab, cls = STATUS_LABEL[st[s["id"]]]
         if s["id"] == "start":
             sell = f"strefa zakupu <b>{fmt(s['buy_range'][0])}–{fmt(s['buy_range'][1])}</b>"
@@ -351,7 +357,8 @@ def capital_table(pc):
     plan = pc["plan"]
     C = plan.get("capital") or {}
     base = {r["step"]: r for r in capital_path(plan, False)}
-    full = {r["step"]: r for r in capital_path(plan, True)}
+    two = show_mids(pc)
+    full = {r["step"]: r for r in capital_path(plan, True)} if two else base
     st = step_status(pc)
     start = step_by_id(plan, "start")
     rows = []
@@ -368,20 +375,22 @@ def capital_table(pc):
         rng_s = lambda r: (f"<br><span class='rng'>do {fs(r['S_hi'])}</span>" if r and r.get("S_hi") else "")
         rows.append(f"<tr class='{cls}'><td>{name}</td><td class='n'>{fmt(b['sell'])}</td><td class='n'>{fmt(b['rebuy']) if b['rebuy'] else 'gotówka'}</td>"
                     f"<td class='n'><b>{cell(a, 'usd', fusd)}</b>{rng_usd(a)}</td><td class='n'>{cell(a, 'S', fs)}{rng_s(a)}</td>"
-                    f"<td class='n'>{cell(b, 'usd', fusd)}{rng_usd(b)}</td><td class='n'>{cell(b, 'S', fs)}{rng_s(b)}</td></tr>")
+                    + (f"<td class='n'>{cell(b, 'usd', fusd)}{rng_usd(b)}</td><td class='n'>{cell(b, 'S', fs)}{rng_s(b)}</td>" if two else "") + "</tr>")
     s0 = float(C.get("start_S", 100000))
     hold = s0 * step_by_id(plan, "2d")["sell"]
     last_a, last_b = list(base.values())[-1], list(full.values())[-1]
     foot = (f"<tr class='tot'><td><b>Wynik na szczycie etapu 2</b></td><td></td><td></td><td class='n'><b>{fusd(last_a['usd'])}</b></td><td></td>"
-            f"<td class='n'><b>{fusd(last_b['usd'])}</b></td><td></td></tr>")
+            + (f"<td class='n'><b>{fusd(last_b['usd'])}</b></td><td></td>" if two else "") + "</tr>")
+    head = ("<tr><th rowspan='2'>Krok</th><th class='n' rowspan='2'>Sprzedaż</th><th class='n' rowspan='2'>Odkup</th>"
+            "<th class='n' colspan='2'>Tylko kroki główne</th>" + ("<th class='n' colspan='2'>Z krokami pośrednimi</th>" if two else "") + "</tr>"
+            "<tr><th class='n'>USD po sprzedaży</th><th class='n'>S po odkupie</th>"
+            + ("<th class='n'>USD po sprzedaży</th><th class='n'>S po odkupie</th>" if two else "") + "</tr>")
     return (f"<h3>Prognoza kapitału na kolejnych krokach</h3>"
             f"<p class='muted'>Start: {fs(s0)} kupione po {fmt(start['buy'])} (ok. {fusd(s0 * start['buy'])}). Wariant ostrożny – limity jak w sygnałach "
             f"(sprzedaż w połowie dolnej części widełek, odkup na górnej granicy), prowizja {str(C.get('fee_pct', 0.4)).replace('.', ',')}% od każdej transakcji. "
             f"Kwota w USD to gotówka po sprzedaży na danym kroku (pod spodem: zakres przy sprzedaży na dolnej i górnej granicy widełek), "
             f"liczba S – stan po odkupie na limicie (pod spodem: ile, gdyby cena zeszła do dolnej granicy widełek odkupu). Dla porównania: trzymanie {fs(s0)} do 0,120 = {fusd(hold)}.</p>"
-            "<div class='tablewrap'><table class='steps cap'><thead><tr><th rowspan='2'>Krok</th><th class='n' rowspan='2'>Sprzedaż</th><th class='n' rowspan='2'>Odkup</th>"
-            "<th class='n' colspan='2'>Tylko kroki główne</th><th class='n' colspan='2'>Z krokami pośrednimi</th></tr>"
-            "<tr><th class='n'>USD po sprzedaży</th><th class='n'>S po odkupie</th><th class='n'>USD po sprzedaży</th><th class='n'>S po odkupie</th></tr></thead>"
+            f"<div class='tablewrap'><table class='steps cap'><thead>{head}</thead>"
             f"<tbody>{''.join(rows)}{foot}</tbody></table></div>"
             "<p class='muted'>To prognoza przy założeniu, że rynek przejdzie ścieżkę planu i każdy odkup się wykona. Każde kupno na wybiciu zamiast odkupu "
             "kosztuje ok. 2–4% na danym kroku. Porównuj swój stan Soniców i gotówki z tą tabelą – pokazuje, czego się trzymać.</p>")
@@ -500,7 +509,8 @@ table.steps td{vertical-align:top}table.cap tr.tot td{border-top:2px solid var(-
 def plan_section(pc, sonic):
     leg = ("<ul class='plan-legend'><li><i class='l-h'></i>cena (zamknięcia dzienne)</li><li><i class='l-p'></i>prognoza wg planu</li>"
            "<li><i class='l-s'></i>widełki sprzedaży</li><li><i class='l-b'></i>widełki zakupu/odkupu</li>"
-           "<li><i class='l-m'></i>krok pośredni (decyzja na gorąco)</li><li><i class='l-i'></i>unieważnienie planu</li><li>mocniej podświetlona strefa = bieżący krok</li></ul>")
+           + 
+           ("<li><i class='l-m'></i>krok pośredni (decyzja na gorąco)</li>" if show_mids(pc) else "") + "<li><i class='l-i'></i>unieważnienie planu</li><li>mocniej podświetlona strefa = bieżący krok</li></ul>")
     meta = pc["plan"]["meta"]
     return (f"<h3>Mapa planu: historia od sierpnia 2026 i prognoza</h3>"
             f"<p class='muted'>{E(meta['basis'])} {E(meta['tempo_note'])}</p>"
@@ -509,6 +519,7 @@ def plan_section(pc, sonic):
             f"<h3>Kroki planu</h3>{steps_table(pc)}{capital_table(pc)}"
             "<p class='muted'><b>Wariant ostrożny:</b> sprzedaż z limitem w połowie między dolną granicą widełek a głównym poziomem, "
             "a gdy cena w widełkach zawraca – od razu. Odkup z limitem na górnej granicy widełek, żeby nie zostać bez pozycji. Gdy odkup się nie wykona: kupno na wybiciu po 2 zamknięciach 1h powyżej poprzedniego celu. "
-            "Kroki pośrednie (żółte) to opory po drodze: bot ostrzega, a decyzję o sprzedaży podejmujesz na gorąco, patrząc, czy cena zawraca. "
+            + ("Kroki pośrednie (żółte) to opory po drodze: bot ostrzega, a decyzję o sprzedaży podejmujesz na gorąco, patrząc, czy cena zawraca. "
+               if show_mids(pc) else "Kroki pośrednie ocenia codzienna analiza w czacie Claude (nie bot). ") +
             "Na ntfy: ostrzeżenie, gdy cena jest 2% od poziomu, i alert w chwili wejścia w widełki (czuwanie co minutę w trakcie świecy), "
             "potem krótkie potwierdzenie po zamknięciu świecy 1h.</p>")
