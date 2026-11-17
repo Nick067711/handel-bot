@@ -306,6 +306,9 @@ def _jsonable(x):
 
 
 def write_repo_file(rel, data):
+    if DRY_RUN and os.getenv("REPO_COPY", "0") != "1":
+        print(f"[DRY_RUN] pomijam zapis raport/{rel} (REPO_COPY=1, żeby zapisać)")
+        return
     path = os.path.join(REPO_DIR, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
