@@ -14,13 +14,14 @@
   "start": {
     "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
     "from": "2026-11-17T16:00:00Z",
-    "phase": "BUY",
-    "step": "start"
+    "phase": "HOLD",
+    "step": "1",
+    "fill": {"date": "2026-11-17T16:01:07Z", "price": 0.0330, "S": 99300, "venue": "Coinbase, zlecenie rynkowe"}
   },
 
   "capital": {
     "_opis": "Do tabeli prognozy kapitału w raporcie: liczba Soniców na starcie i prowizja od każdej transakcji (Coinbase, maker 0,2% przy zleceniach z limitem).",
-    "start_S": 100000,
+    "start_S": 99300,
     "fee_pct": 0.2
   },
 
@@ -55,8 +56,8 @@
 
   "steps": [
     {"id": "start", "stage": 1, "label": "Start – akumulacja",
-     "buy": 0.0320, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0334,
-     "eta": "2026-11-17", "note": "Po przebiciu 64 tys. przez BTC: limit 0,03201 (krok nad ścianami 0,0320/0,03199 na Coinbase, scenariusz BTC ok. 62 tys.) + stop-buy 0,03336 (odzyskanie oporu 0,0331–0,03335)"},
+     "buy": 0.0330, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0334,
+     "eta": "2026-11-17", "note": "Kupione 17.11.2026 ok. 18:01: 99 300 S po średnio ok. 0,0330 (Coinbase, zlecenie rynkowe, po odbiciu BTC od 63 336)"},
     {"id": "1a", "stage": 1, "label": "Pośredni 1a – SMA100", "intermediate": true,
      "sell": 0.0365, "sell_range": [0.0360, 0.0372], "eta": "2026-11-20",
      "rebuy": 0.0336, "rebuy_range": [0.0330, 0.0342], "rebuy_eta": "2026-11-22", "breakout": 0.0372,
