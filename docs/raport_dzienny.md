@@ -20,6 +20,9 @@ Kontekst: użytkownik handluje Sonikiem tylko na Coinbase (S-USD, płytki rynek 
 Jeśli Sonic jest do ok. 5% od widełek najbliższego kroku pośredniego (albo w nich), oceń, czy go wykonać. Sprzedaż na pośrednim ma sens tylko przy realnym ryzyku odwrócenia (słabnące momentum Sonica na 4h/1h przy oporze, słabość BTC, zagrożenie kluczowego wsparcia, negatywne makro). Rachunek: ok. +5% Soniców przy trafionym odkupie, ok. −4% przy kupnie na wybiciu. Podaj jednoznacznie: „sprzedać na pośrednim (limit X, odkup Y)” albo „nie sprzedawać, trzymać do głównego celu”. Jeśli żaden pośredni nie jest w pobliżu – nie wspominaj o nich.
 Niezależnie od tego: przy wysokim ryzyku silnego spadku BTC, który pociągnąłby Sonica pod plan, powiedz to wprost i wskaż poziom ochronnej sprzedaży.
 
+## 3a. Zasada: odbicie w przebity poziom
+Jeśli BTC (albo Sonic) przebił wsparcie i teraz odbija z powrotem do tego poziomu (przebita podstawa = opór), NIE sugeruj zakupu w trakcie takiego odbicia. Napisz wprost: „to odbicie w opór X – nie wchodź przed zamknięciem 1h nad X albo poczekaj na powrót do dołka Y”. Takie odbicia są zwykle sprzedawane (np. 17.11.2026: BTC przebił 64 000, odbił z 63 336 do 64 483, dokładnie w przebitą podstawę 64 250–64 500, i znów spadł). Tę samą zasadę stosuj w każdej odpowiedzi na żywo.
+
 ## 4. Makro
 Krótkie wyszukiwanie w sieci z bieżącą datą: Fed/stopy, dane z USA, przepływy do ETF, ważne wiadomości o Sonicu/Sonic Labs z ostatniej doby.
 
