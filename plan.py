@@ -58,10 +58,26 @@ def mids_before(plan, sid):
     return []
 
 
+def r4(x):
+    return round(x, 4) if x < 0.1 else round(x, 3)
+
+
+def sell_limit(lo, main):
+    """Wariant ostrożny: zlecenie sprzedaży w połowie między dolną granicą widełek a głównym poziomem."""
+    return r4((lo + main) / 2)
+
+
 def mid_info(s):
     return dict(id=s["id"], label=s["label"], lo=s["sell_range"][0], hi=s["sell_range"][1], main=s["sell"],
-                rebuy_lo=s["rebuy_range"][0], rebuy_hi=s["rebuy_range"][1], rebuy=s["rebuy"], breakout=s.get("breakout", s["sell"]),
-                note=s.get("note"), status="pending")
+                limit=sell_limit(s["sell_range"][0], s["sell"]),
+                rebuy_lo=s["rebuy_range"][0], rebuy_hi=s["rebuy_range"][1], rebuy=s["rebuy"], rebuy_limit=s["rebuy_range"][1],
+                breakout=s.get("breakout", s["sell"]), note=s.get("note"), status="pending")
+
+
+def mids_for(plan, target):
+    if not target or not plan["signal_rules"].get("intermediate_alerts", True):
+        return []
+    return [mid_info(m) for m in mids_before(plan, target["step"])]
 
 
 def step_by_id(plan, sid):
@@ -79,19 +95,19 @@ def buy_zone(plan, sid):
     s = step_by_id(plan, sid)
     if sid == "start":
         lo, hi = s["buy_range"]
-        return dict(step=sid, lo=lo, hi=hi, main=s["buy"], trigger=s["buy"], breakout=s.get("breakout"),
+        return dict(step=sid, lo=lo, hi=hi, main=s["buy"], trigger=s["buy"], limit=s["buy"], breakout=s.get("breakout"),
                     label="strefa akumulacji", note=s.get("note"))
     if not s.get("rebuy_range"):
         return None
     lo, hi = s["rebuy_range"]
-    return dict(step=sid, lo=lo, hi=hi, main=s["rebuy"], trigger=hi, breakout=s.get("breakout", s["sell"]),
+    return dict(step=sid, lo=lo, hi=hi, main=s["rebuy"], trigger=hi, limit=hi, breakout=s.get("breakout", s["sell"]),
                 label="odkup po kroku " + s["label"].lower().replace("krok ", ""), note=s.get("rebuy_note"))
 
 
 def sell_zone(plan, sid):
     s = step_by_id(plan, sid)
     lo, hi = s["sell_range"]
-    return dict(step=sid, lo=lo, hi=hi, main=s["sell"], label=s["label"], final=s.get("final", False),
+    return dict(step=sid, lo=lo, hi=hi, main=s["sell"], limit=sell_limit(lo, s["sell"]), label=s["label"], final=s.get("final", False),
                 condition=s.get("condition"))
 
 
@@ -153,7 +169,7 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
     zone = buy_zone(plan, sid) if phase == "BUY" else None
     target = sell_zone(plan, sid) if phase == "HOLD" else sell_zone(plan, next_trade_step(plan, sid)["id"])
     last_fill = None          # strefa ostatniego zakupu (do reguły „odkup zawiódł”)
-    mids = [mid_info(m) for m in mids_before(plan, target["step"])] if target else []
+    mids = mids_for(plan, target)
     events, prep_sent = [], set()
     above = below = 0
     armed = False
@@ -185,7 +201,7 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
             if c["l"] <= zone["trigger"]:
                 ev("BUY", c, step=zone["step"], zone=zone, target=target, fill=min(zone["trigger"], c["o"]))
                 last_fill, phase, above, below, armed = zone, "HOLD", 0, 0, False
-                mids = [mid_info(m) for m in mids_before(plan, target["step"])] if target else []
+                mids = mids_for(plan, target)
                 continue
             bo = zone.get("breakout")
             if bo and c["c"] < bo:
@@ -195,7 +211,7 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
                 if above >= R["breakout_closes_1h"]:
                     ev("BUY_BREAKOUT", c, step=zone["step"], zone=zone, target=target, level=bo)
                     last_fill, phase, above, below, armed = dict(zone, lo=bo * 0.97, hi=bo), "HOLD", 0, 0, False
-                    mids = [mid_info(m) for m in mids_before(plan, target["step"])] if target else []
+                    mids = mids_for(plan, target)
                     continue
         else:  # HOLD
             # kroki pośrednie: sygnał „obserwuj / decyzja na gorąco” i – jeśli się sprzedało – odkup lub wybicie
@@ -289,14 +305,14 @@ def next_action(plan, state):
     t = state.get("target")
     if ph == "BUY":
         z = state["zone"]
-        txt = (f"Czekamy na zakup: {z['label']} {fmt(z['lo'])}–{fmt(z['hi'])}, zlecenie z limitem ok. {fmt(z['trigger'] if z['step'] == 'start' else z['main'])}")
+        txt = (f"Czekamy na zakup: {z['label']} {fmt(z['lo'])}–{fmt(z['hi'])}, zlecenie z limitem {fmt(z['limit'])}")
         if z.get("breakout"):
             txt += f"; jeśli nie zejdzie – kupno na wybiciu: 2 zamknięcia 1h powyżej {fmt(z['breakout'])}"
         if t:
-            txt += f". Następna sprzedaż: {t['label']} {fmt(t['main'])} ({fmt(t['lo'])}–{fmt(t['hi'])})."
+            txt += f". Następna sprzedaż: {t['label']} – limit {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}, główny poziom {fmt(t['main'])})."
         return txt
-    return (f"Trzymamy Sonica. Zlecenie sprzedaży z limitem: {t['label']} {fmt(t['main'])} "
-            f"(widełki {fmt(t['lo'])}–{fmt(t['hi'])}; sprzedać w dolnej części widełek)."
+    return (f"Trzymamy Sonica. Zlecenie sprzedaży z limitem: {t['label']} {fmt(t['limit'])} "
+            f"(widełki {fmt(t['lo'])}–{fmt(t['hi'])}, główny poziom {fmt(t['main'])}; wariant ostrożny)."
             + (f" Warunek: {t['condition']}." if t.get("condition") else ""))
 
 
@@ -433,3 +449,25 @@ def event_class_key(plan, e):
     if not c:
         return None, None
     return f"{plan['start']['from']}|{c[0]}:{e.get('step')}", c[1]
+
+
+# ----------------------------------------------------------------- prognoza kapitału (wariant ostrożny)
+def capital_path(plan, use_mid):
+    """Kolejne transakcje wg limitów wariantu ostrożnego: [{step, label, sell, usd, rebuy, S, mid}] do szczytu etapu 2."""
+    C = plan.get("capital") or {}
+    S, fee = float(C.get("start_S", 100000)), float(C.get("fee_pct", 0.4)) / 100
+    rows = []
+    for s in plan["steps"]:
+        if s["id"] == "start" or s.get("checkpoint"):
+            continue
+        if s.get("intermediate") and not use_mid:
+            continue
+        sp = sell_limit(s["sell_range"][0], s["sell"])
+        usd = S * sp * (1 - fee)
+        if s["id"] == "2d" or s.get("final") or not s.get("rebuy_range"):
+            rows.append(dict(step=s["id"], label=s["label"], sell=sp, usd=usd, rebuy=None, S=None, mid=bool(s.get("intermediate"))))
+            break
+        bp = s["rebuy_range"][1]
+        S = usd / bp * (1 - fee)
+        rows.append(dict(step=s["id"], label=s["label"], sell=sp, usd=usd, rebuy=bp, S=S, mid=bool(s.get("intermediate"))))
+    return rows

@@ -13,9 +13,15 @@
 
   "start": {
     "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
-    "from": "2026-11-17T09:00:00Z",
+    "from": "2026-11-17T13:00:00Z",
     "phase": "BUY",
     "step": "start"
+  },
+
+  "capital": {
+    "_opis": "Do tabeli prognozy kapitału w raporcie: liczba Soniców na starcie i prowizja od każdej transakcji (Coinbase, zlecenia z limitem).",
+    "start_S": 100000,
+    "fee_pct": 0.4
   },
 
   "signal_rules": {
@@ -28,7 +34,9 @@
     "send_window_hours": 3,
     "live_near_pct": 2.0,
     "live_poll_seconds": 60,
-    "live_breakout_watch_pct": 1.0
+    "live_breakout_watch_pct": 1.0,
+    "intermediate_alerts": true,
+    "execution": "ostrożny: sprzedaż w połowie między dolną granicą widełek a głównym poziomem, odkup na górnej granicy widełek"
   },
 
   "invalidation": {
@@ -47,8 +55,8 @@
 
   "steps": [
     {"id": "start", "stage": 1, "label": "Start – akumulacja",
-     "buy": 0.0328, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0368,
-     "eta": "2026-11-17", "note": "Limit ok. 0,0326–0,0331 albo stop-buy 0,0368 przy wybiciu nad SMA100"},
+     "buy": 0.0336, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0368,
+     "eta": "2026-11-17", "note": "Wariant ostrożny: limit 0,0336 (górna granica strefy, na Coinbase krok nad ścianą kupna) albo stop-buy 0,0368 przy wybiciu nad SMA100"},
     {"id": "1a", "stage": 1, "label": "Pośredni 1a – SMA100", "intermediate": true,
      "sell": 0.0365, "sell_range": [0.0360, 0.0372], "eta": "2026-11-20",
      "rebuy": 0.0336, "rebuy_range": [0.0330, 0.0342], "rebuy_eta": "2026-11-22", "breakout": 0.0372,
