@@ -453,21 +453,59 @@ def event_class_key(plan, e):
 
 # ----------------------------------------------------------------- prognoza kapitału (wariant ostrożny)
 def capital_path(plan, use_mid):
-    """Kolejne transakcje wg limitów wariantu ostrożnego: [{step, label, sell, usd, rebuy, S, mid}] do szczytu etapu 2."""
+    """Kolejne transakcje wg limitów wariantu ostrożnego do szczytu etapu 2.
+    Każdy wiersz: S_in (Sonic przed sprzedażą), sell (limit), usd (gotówka po sprzedaży) z zakresem usd_lo/usd_hi (sprzedaż na dolnej/górnej
+    granicy widełek), rebuy (limit), S (Sonic po odkupie) z zakresem S_lo/S_hi (odkup na górnej/dolnej granicy)."""
     C = plan.get("capital") or {}
-    S, fee = float(C.get("start_S", 100000)), float(C.get("fee_pct", 0.4)) / 100
+    S, fee = float(C.get("start_S", 100000)), float(C.get("fee_pct", 0.2)) / 100
     rows = []
     for s in plan["steps"]:
         if s["id"] == "start" or s.get("checkpoint"):
             continue
         if s.get("intermediate") and not use_mid:
             continue
-        sp = sell_limit(s["sell_range"][0], s["sell"])
-        usd = S * sp * (1 - fee)
+        lo, hi = s["sell_range"]
+        sp = sell_limit(lo, s["sell"])
+        row = dict(step=s["id"], label=s["label"], mid=bool(s.get("intermediate")), S_in=S, sell=sp, sell_lo=lo, sell_hi=hi,
+                   usd=S * sp * (1 - fee), usd_lo=S * lo * (1 - fee), usd_hi=S * hi * (1 - fee), rebuy=None, S=None)
         if s["id"] == "2d" or s.get("final") or not s.get("rebuy_range"):
-            rows.append(dict(step=s["id"], label=s["label"], sell=sp, usd=usd, rebuy=None, S=None, mid=bool(s.get("intermediate"))))
+            rows.append(row)
             break
-        bp = s["rebuy_range"][1]
-        S = usd / bp * (1 - fee)
-        rows.append(dict(step=s["id"], label=s["label"], sell=sp, usd=usd, rebuy=bp, S=S, mid=bool(s.get("intermediate"))))
+        rlo, rhi = s["rebuy_range"]
+        row.update(rebuy=rhi, rebuy_lo=rlo, rebuy_hi=rhi, S=row["usd"] / rhi * (1 - fee), S_hi=row["usd"] / rlo * (1 - fee))
+        S = row["S"]
+        rows.append(row)
     return rows
+
+
+def amounts_for(plan, step_id, mid=False):
+    """Kwoty wg planu dla kroku. Kroki główne liczone na ścieżce bez pośrednich (pośrednie są opcjonalne);
+    krok pośredni – od stanu Soniców przed najbliższym krokiem głównym."""
+    base = capital_path(plan, False)
+    if not mid:
+        return next((r for r in base if r["step"] == step_id), None)
+    s = step_by_id(plan, step_id)
+    nxt = None
+    seen = False
+    for x in plan["steps"]:
+        if x["id"] == step_id:
+            seen = True
+            continue
+        if seen and not x.get("intermediate") and not x.get("checkpoint"):
+            nxt = x["id"]
+            break
+    S = next((r["S_in"] for r in base if r["step"] == nxt), float((plan.get("capital") or {}).get("start_S", 100000)))
+    fee = float((plan.get("capital") or {}).get("fee_pct", 0.2)) / 100
+    lo, hi = s["sell_range"]
+    sp = sell_limit(lo, s["sell"])
+    usd = S * sp * (1 - fee)
+    rlo, rhi = s["rebuy_range"]
+    return dict(step=step_id, S_in=S, sell=sp, sell_lo=lo, sell_hi=hi, usd=usd, usd_lo=S * lo * (1 - fee), usd_hi=S * hi * (1 - fee),
+                rebuy=rhi, rebuy_lo=rlo, rebuy_hi=rhi, S=usd / rhi * (1 - fee), S_hi=usd / rlo * (1 - fee))
+
+
+def start_amounts(plan):
+    C = plan.get("capital") or {}
+    st = step_by_id(plan, "start")
+    S0, fee = float(C.get("start_S", 100000)), float(C.get("fee_pct", 0.2)) / 100
+    return dict(S=S0, limit=st["buy"], usd=S0 * st["buy"] * (1 + fee), usd_lo=S0 * st["buy_range"][0], usd_hi=S0 * st["buy_range"][1])

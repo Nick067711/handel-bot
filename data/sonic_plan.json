@@ -19,9 +19,9 @@
   },
 
   "capital": {
-    "_opis": "Do tabeli prognozy kapitału w raporcie: liczba Soniców na starcie i prowizja od każdej transakcji (Coinbase, zlecenia z limitem).",
+    "_opis": "Do tabeli prognozy kapitału w raporcie: liczba Soniców na starcie i prowizja od każdej transakcji (Coinbase, maker 0,2% przy zleceniach z limitem).",
     "start_S": 100000,
-    "fee_pct": 0.4
+    "fee_pct": 0.2
   },
 
   "signal_rules": {

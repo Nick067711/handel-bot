@@ -364,9 +364,11 @@ def capital_table(pc):
         cls = ("midrow " if s.get("intermediate") else "") + ("st-cur" if cur else "")
         name = (f"<span class='midtag'>pośredni</span> " + E(s["label"].replace("Pośredni ", ""))) if s.get("intermediate") else E(s["label"])
         cell = lambda r, k, f: f(r[k]) if r and r.get(k) is not None else "<span class='muted'>–</span>"
+        rng_usd = lambda r: (f"<br><span class='rng'>{fusd(r['usd_lo'])} – {fusd(r['usd_hi'])}</span>" if r else "")
+        rng_s = lambda r: (f"<br><span class='rng'>do {fs(r['S_hi'])}</span>" if r and r.get("S_hi") else "")
         rows.append(f"<tr class='{cls}'><td>{name}</td><td class='n'>{fmt(b['sell'])}</td><td class='n'>{fmt(b['rebuy']) if b['rebuy'] else 'gotówka'}</td>"
-                    f"<td class='n'><b>{cell(a, 'usd', fusd)}</b></td><td class='n'>{cell(a, 'S', fs)}</td>"
-                    f"<td class='n'>{cell(b, 'usd', fusd)}</td><td class='n'>{cell(b, 'S', fs)}</td></tr>")
+                    f"<td class='n'><b>{cell(a, 'usd', fusd)}</b>{rng_usd(a)}</td><td class='n'>{cell(a, 'S', fs)}{rng_s(a)}</td>"
+                    f"<td class='n'>{cell(b, 'usd', fusd)}{rng_usd(b)}</td><td class='n'>{cell(b, 'S', fs)}{rng_s(b)}</td></tr>")
     s0 = float(C.get("start_S", 100000))
     hold = s0 * step_by_id(plan, "2d")["sell"]
     last_a, last_b = list(base.values())[-1], list(full.values())[-1]
@@ -375,7 +377,8 @@ def capital_table(pc):
     return (f"<h3>Prognoza kapitału na kolejnych krokach</h3>"
             f"<p class='muted'>Start: {fs(s0)} kupione po {fmt(start['buy'])} (ok. {fusd(s0 * start['buy'])}). Wariant ostrożny – limity jak w sygnałach "
             f"(sprzedaż w połowie dolnej części widełek, odkup na górnej granicy), prowizja {str(C.get('fee_pct', 0.4)).replace('.', ',')}% od każdej transakcji. "
-            f"Kwota w USD to gotówka po sprzedaży na danym kroku, liczba S – stan po odkupie. Dla porównania: trzymanie {fs(s0)} do 0,120 = {fusd(hold)}.</p>"
+            f"Kwota w USD to gotówka po sprzedaży na danym kroku (pod spodem: zakres przy sprzedaży na dolnej i górnej granicy widełek), "
+            f"liczba S – stan po odkupie na limicie (pod spodem: ile, gdyby cena zeszła do dolnej granicy widełek odkupu). Dla porównania: trzymanie {fs(s0)} do 0,120 = {fusd(hold)}.</p>"
             "<div class='tablewrap'><table class='steps cap'><thead><tr><th rowspan='2'>Krok</th><th class='n' rowspan='2'>Sprzedaż</th><th class='n' rowspan='2'>Odkup</th>"
             "<th class='n' colspan='2'>Tylko kroki główne</th><th class='n' colspan='2'>Z krokami pośrednimi</th></tr>"
             "<tr><th class='n'>USD po sprzedaży</th><th class='n'>S po odkupie</th><th class='n'>USD po sprzedaży</th><th class='n'>S po odkupie</th></tr></thead>"
@@ -484,7 +487,7 @@ table.steps tr.midrow td{font-size:.9em}.badge-mid{color:var(--warn);font-weight
 .pmap rect:hover,.pmap circle:hover{opacity:.9}
 .act{font-size:1.08rem;font-weight:600;margin:4px 0 12px;line-height:1.5}
 .now-panel{border-left:3px solid var(--sonic)}
-table.steps td{vertical-align:top}table.cap tr.tot td{border-top:2px solid var(--line)}table.cap th{white-space:nowrap}table.steps tr.st-cur td{background:rgba(92,200,232,.10)}table.steps tr.st-done td{color:var(--muted)}
+table.steps td{vertical-align:top}table.cap tr.tot td{border-top:2px solid var(--line)}table.cap th{white-space:nowrap}table.cap .rng{color:var(--muted);font-size:.78rem;font-weight:400;white-space:nowrap}table.steps tr.st-cur td{background:rgba(92,200,232,.10)}table.steps tr.st-done td{color:var(--muted)}
 .badge-cur{background:var(--sonic);color:var(--ink);border-radius:4px;padding:1px 7px;font-weight:700;font-size:.82rem;white-space:nowrap}
 .badge-done{color:var(--pos);font-weight:600;font-size:.86rem}
 .plan-legend{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:.85rem;margin:4px 0 0;padding:0;list-style:none}
