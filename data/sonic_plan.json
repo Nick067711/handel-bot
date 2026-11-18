@@ -34,6 +34,13 @@
               "note": "Pierwszy opór po wybiciu: SMA100 0,0367 i ściana 0,0367–0,0370. Gdy pęknie bez cofnięcia: kolejny cel 0,0392."}
   },
 
+  "stochrsi": {
+    "_opis": "Alerty StochRSI 1h Sonica na ntfy (prośba użytkownika 18.11.2026). TOP: linia STOCHRSI przechodzi w górę przez top_level (obserwuj szczyt; info o dywergencji z poprzednim szczytem). BOTTOM: linia schodzi do bottom_level (możliwy dołek). Dane: Binance S/USDC 1h (jak w aplikacji użytkownika), zapas S/USDT, potem Coinbase.",
+    "enabled": true, "symbol": "SUSDC", "fallback_symbol": "SUSDT",
+    "rsi_len": 12, "stoch_len": 6, "k_smooth": 1, "d_smooth": 5,
+    "top_level": 58, "bottom_level": 5
+  },
+
   "signal_rules": {
     "interval": "1h (tylko zamknięte świece)",
     "prep_sell_pct": 2.0,

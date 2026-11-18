@@ -292,6 +292,99 @@ def ai_sonic_data(s, plan_ai=None):
         elliott_obecnie=H.ELLIOTT_INTERPRETATION[-1]["opis"]))
 
 
+# ----------------------------------------------------------------- StochRSI 1h (alerty na życzenie użytkownika)
+def _rsi(c, n):
+    out, g, l = [None] * len(c), 0.0, 0.0
+    for i in range(1, len(c)):
+        d = c[i] - c[i - 1]
+        if i <= n:
+            g += max(d, 0); l += max(-d, 0)
+            if i == n:
+                g /= n; l /= n
+                out[i] = 100 - 100 / (1 + g / l) if l else 100
+        else:
+            g = (g * (n - 1) + max(d, 0)) / n
+            l = (l * (n - 1) + max(-d, 0)) / n
+            out[i] = 100 - 100 / (1 + g / l) if l else 100
+    return out
+
+
+def stoch_rsi(closes, rl=14, sl=14, k=3, d=3):
+    r = _rsi(closes, rl)
+    raw = [None] * len(closes)
+    for i in range(len(closes)):
+        w = [x for x in r[max(0, i - sl + 1):i + 1] if x is not None]
+        if len(w) == sl:
+            lo, hi = min(w), max(w)
+            raw[i] = (r[i] - lo) / (hi - lo) * 100 if hi > lo else 0.0
+    def sma(a, n, i):
+        w = a[i - n + 1:i + 1] if i >= n - 1 else []
+        return sum(w) / n if w and all(x is not None for x in w) else None
+    K = [sma(raw, k, i) for i in range(len(closes))]
+    D = [sma(K, d, i) for i in range(len(closes))]
+    return K, D
+
+
+async def fetch_binance_1h(session, errors, symbol):
+    url = "https://data-api.binance.vision/api/v3/klines"
+    d = await M.safe(M.get_json(session, url, {"symbol": symbol, "interval": "1h", "limit": 300}), f"Binance {symbol} 1h", errors)
+    if not d:
+        return None
+    return A.closed_only([dict(t=int(k[0]) // 1000, o=float(k[1]), h=float(k[2]), l=float(k[3]), c=float(k[4]), v=float(k[5])) for k in d], period=3600)
+
+
+def stoch_events(cfg, candles, src):
+    """Przejście K w górę przez top_level i w dół do bottom_level na ostatnich zamkniętych świecach 1h."""
+    if not candles or len(candles) < 60:
+        return []
+    K, D = stoch_rsi([c["c"] for c in candles], cfg["rsi_len"], cfg["stoch_len"], cfg["k_smooth"], cfg["d_smooth"])
+    top, bot = cfg["top_level"], cfg["bottom_level"]
+    ev = []
+    for i in range(len(candles) - 3, len(candles)):
+        if i < 1 or K[i] is None or K[i - 1] is None:
+            continue
+        c = candles[i]
+        if K[i] >= top > K[i - 1]:
+            # poprzedni szczyt K (>= 80) przed bieżącym wzrostem – do oceny dywergencji
+            j = i - 1
+            while j > 0 and K[j] is not None and K[j] < top:
+                j -= 1
+            prev = None
+            for m in range(j, max(0, j - 72), -1):
+                if K[m] is not None and K[m] >= 80 and (K[m - 1] is None or K[m] >= K[m - 1]) and (K[m + 1] is None or K[m] >= K[m + 1]):
+                    prev = m
+                    break
+            ev.append(dict(kind="STOCH_TOP", t=c["t"] + 3600, k=K[i], d=D[i], price=c["c"], high=c["h"],
+                           prev=(dict(t=candles[prev]["t"] + 3600, k=K[prev], price=max(x["h"] for x in candles[max(0, prev - 1):prev + 2])) if prev is not None else None),
+                           src=src))
+        if K[i] <= bot < K[i - 1]:
+            ev.append(dict(kind="STOCH_BOTTOM", t=c["t"] + 3600, k=K[i], d=D[i], price=c["c"], low=c["l"], src=src))
+    return ev
+
+
+def stoch_message(e, plan, btc_ctx):
+    when = N.pl_time(e["t"])
+    if e["kind"] == "STOCH_TOP":
+        title = f"StochRSI 1h ≥ {plan['stochrsi']['top_level']} – obserwuj szczyt Sonica"
+        lines = [f"Świeca 1h {N.pl_time(e['t'] - 3600)}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}."]
+        pv = e.get("prev")
+        if pv:
+            higher = e["high"] > pv["price"]
+            lines.append(f"Poprzedni szczyt StochRSI: {pv['k']:.0f} przy cenie {P.fmt(pv['price'])} ({N.pl_time(pv['t'])}).")
+            if higher and e["k"] < pv["k"]:
+                lines.append("Cena wyżej niż przy poprzednim szczycie, a StochRSI niżej – DYWERGENCJA (Twoja zasada: do sprzedania).")
+            elif not higher:
+                lines.append("Cena niżej niż przy poprzednim szczycie – niższy szczyt.")
+    else:
+        title = f"StochRSI 1h ≤ {plan['stochrsi']['bottom_level']} – możliwy dołek Sonica"
+        lines = [f"Świeca 1h {N.pl_time(e['t'] - 3600)}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}, dołek świecy {P.fmt(e['low'])}."]
+    lines.append(f"Dane: Binance {e['src']} 1h.")
+    bl = N.btc_line(btc_ctx)
+    if bl:
+        lines.append(bl)
+    return title, "\n".join(lines)
+
+
 # ----------------------------------------------------------------- kopia wyników w repozytorium
 def _jsonable(x):
     if isinstance(x, dict):
@@ -378,6 +471,16 @@ async def main():
     async with aiohttp.ClientSession() as session:
         sd = await fetch_sonic(session, errors, full=report_due)
         c1h, src1h = await fetch_sonic_1h(session, errors, P.iso_ts(plan["start"]["from"]))
+        st_candles, st_src = None, None
+        scfg = plan.get("stochrsi") or {}
+        if scfg.get("enabled"):
+            for sym in (scfg.get("symbol", "SUSDC"), scfg.get("fallback_symbol", "SUSDT")):
+                st_candles = await fetch_binance_1h(session, errors, sym)
+                if st_candles:
+                    st_src = sym.replace("S", "S/", 1)
+                    break
+            if not st_candles:
+                st_candles, st_src = c1h, "Coinbase S-USD"
         if len(sd["candles"]) < 250:
             print("KRYTYCZNE: za mało świec Sonica do analizy – przerywam bez publikacji")
             publish(state)
@@ -423,6 +526,18 @@ async def main():
             state["signals"] = (state.get("signals") or [])[-99:] + [dict(kind=e["kind"], step=e.get("step"), t=e["t"],
                                                                          price=e["price"], sent_at=now.isoformat())]
     state["sent_cls"] = sorted(sent_cls)[-400:]
+
+    # --- StochRSI 1h (alerty informacyjne)
+    scfg = plan.get("stochrsi") or {}
+    if scfg.get("enabled") and st_candles:
+        for e in stoch_events(scfg, st_candles, st_src):
+            k = f"{e['kind']}:{e['t']}"
+            if k in sent or e["t"] < now_ts - 3 * 3600:
+                continue
+            title, body = stoch_message(e, plan, btc_ctx)
+            if N.send(title, body, 4, ["chart_with_upwards_trend" if e["kind"] == "STOCH_TOP" else "chart_with_downwards_trend"], REPORT_URL, DRY_RUN):
+                sent.add(k)
+                log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ=e["kind"], krok=None, cena=e["price"], tytul=title, tresc=body))
     state["ntfy_sent"] = sorted(sent, key=lambda k: int(k.rsplit(":", 1)[-1]))[-300:]
     state["plan_phase"] = pst["phase"]
 
