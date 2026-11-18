@@ -93,8 +93,8 @@ def btc_line(btc):
     return " | ".join(parts)
 
 
-def message(e, plan, btc=None):
-    """(tytuł, treść) dla zdarzenia z plan.replay()."""
+def _message_long(e, plan, btc=None):
+    """(tytuł, treść) dla zdarzenia z plan.replay() – wersja opisowa (kanał, unieważnienie)."""
     k = e["kind"]; t = e.get("target"); z = e.get("zone")
     when = pl_time(e["t"])
     lines = []
@@ -249,8 +249,8 @@ def zone_txt(z):
     return f"{fmt(z['lo'])}–{fmt(z['hi'])}"
 
 
-def live_message(w, level, price, plan, btc=None, now_ts=None):
-    """Alert na żywo (świeca 1h w trakcie). Zwraca (tytuł, treść, priorytet, tagi)."""
+def _live_message_long(w, level, price, plan, btc=None, now_ts=None):
+    """Alert na żywo – wersja opisowa (nieużywana od 19.11.2026)."""
     import time
     when = pl_time(now_ts or int(time.time()))
     k, t = w["kind"], w.get("target")
@@ -383,9 +383,214 @@ def send(title, body, priority=4, tags=None, click=None, dry_run=False):
         return False
 
 
-def send_event(e, plan, btc=None, click=None, dry_run=False, confirm=False):
+def send_event(e, plan, btc=None, click=None, dry_run=False, confirm=False, state=None):
     if confirm:
         title, body = confirm_message(e, plan, btc)
         return send(title, body, PRIORITY["CONFIRM"], TAGS["CONFIRM"], click, dry_run), title, body
-    title, body = message(e, plan, btc)
+    title, body = message(e, plan, btc, state)
     return send(title, body, PRIORITY.get(e["kind"], 3), TAGS.get(e["kind"]), click, dry_run), title, body
+
+
+# ----------------------------------------------------------------- zwięzłe komunikaty (od 19.11.2026)
+# Każdy sygnał: co ustawić (sprzedaż / odkup z widełkami), tunel bieżącego stopnia (od–do, %), kwoty, BTC.
+
+def _step_card_data(plan, sid):
+    """Dane stopnia: sprzedaż i odkup (limity ostrożne + widełki), wybicie."""
+    from plan import step_by_id, mid_info, sell_zone, buy_zone
+    s = step_by_id(plan, sid)
+    if s.get("intermediate"):
+        m = mid_info(s)
+        return dict(id=sid, mid=True, name=f"stopień {sid} (pośredni)", s_lo=m["lo"], s_hi=m["hi"], s_lim=m["limit"],
+                    b_lo=m["rebuy_lo"], b_hi=m["rebuy_hi"], b_lim=m["rebuy_limit"], bo=m["breakout"])
+    t, z = sell_zone(plan, sid), buy_zone(plan, sid)
+    d = dict(id=sid, mid=False, name=f"stopień {sid}", s_lo=t["lo"], s_hi=t["hi"], s_lim=t["limit"],
+             b_lo=None, b_hi=None, b_lim=None, bo=None, final=t.get("final"))
+    if z:
+        d.update(b_lo=z["lo"], b_hi=z["hi"], b_lim=z["limit"], bo=z.get("breakout"))
+    return d
+
+
+def _amounts_row(plan, sid):
+    try:
+        from plan import capital_path
+        return next((r for r in capital_path(plan, True) if r["step"] == sid), None)
+    except Exception:
+        return None
+
+
+def card_lines(plan, sid, sell_first=True):
+    """Zwięzła karta stopnia: SPRZEDAŻ / ODKUP / tunel / wybicie / kwota."""
+    d = _step_card_data(plan, sid)
+    L = [f"SPRZEDAŻ {fmt(d['s_lim'])}  (widełki {fmt(d['s_lo'])}–{fmt(d['s_hi'])})"]
+    if d["b_lim"]:
+        L.append(f"ODKUP {fmt(d['b_lim'])}  (widełki {fmt(d['b_lo'])}–{fmt(d['b_hi'])})")
+        L.append(f"Tunel {d['name']}: {fmt(d['b_lim'])} – {fmt(d['s_lim'])} ({fp(pct(d['s_lim'], d['b_lim']), True)})")
+        if d["bo"]:
+            L.append(f"Bez korekty: odkup na wybiciu po 2 zamkn. 1h > {fmt(round(d['bo'] * 1.01, 4))}")
+    elif d.get("final"):
+        L.append("To finał planu – potem gotówka.")
+    r = _amounts_row(plan, sid)
+    if r:
+        L.append(f"Kwota wg planu: {fsn(r['S_in'])} → {fu(r['usd'])}" + (f" → {fsn(r['S'])}" if r.get("S") else ""))
+    if not sell_first:
+        L = L[1:2] + L[:1] + L[2:]
+    return L
+
+
+def next_step_id(state):
+    """Najbliższy stopień do zagrania w bieżącym stanie planu."""
+    for m in state.get("mids") or []:
+        if m["status"] == "pending":
+            return m["id"]
+    t = state.get("target")
+    return t["step"] if t else None
+
+
+def state_card(plan, state):
+    """Karta dla sygnałów informacyjnych (wsparcia, StochRSI): co ustawić teraz wg planu."""
+    if not state:
+        return []
+    if state["phase"] == "BUY" and state.get("zone"):
+        z = state["zone"]
+        L = [f"KUP {fmt(z['limit'])}  (strefa {fmt(z['lo'])}–{fmt(z['hi'])})"]
+        t = state.get("target")
+        if t:
+            L.append(f"Potem SPRZEDAŻ {fmt(t['limit'])}  (widełki {fmt(t['lo'])}–{fmt(t['hi'])})")
+            L.append(f"Tunel: {fmt(z['limit'])} – {fmt(t['limit'])} ({fp(pct(t['limit'], z['limit']), True)})")
+        return L
+    sid = next_step_id(state)
+    if not sid:
+        return []
+    touched = [m for m in state.get("mids") or [] if m["status"] == "touched"]
+    L = []
+    for m in touched:
+        L.append(f"Po kroku {m['id']} (jeśli sprzedałeś): ODKUP {fmt(m['rebuy_limit'])} (widełki {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])})")
+    return L + ["Następny stopień:"] + card_lines(plan, sid)
+
+
+def _btc_short(btc):
+    if not btc or not btc.get("price"):
+        return ""
+    p = btc["price"]
+    out = f"BTC {fmt(p)}"
+    if btc.get("below"):
+        out += f" | wsp. {fmt(btc['below']['price'])}"
+    if btc.get("above"):
+        out += f" | opór {fmt(btc['above']['price'])}"
+    return out
+
+
+def _after_mid_id(plan, state, mid_id):
+    """Stopień po kroku pośrednim mid_id: kolejny pośredni (jeśli jest i czeka) albo cel główny."""
+    ids = [m["id"] for m in (state or {}).get("mids") or []]
+    if mid_id in ids:
+        for m in (state.get("mids") or [])[ids.index(mid_id) + 1:]:
+            if m["status"] == "pending":
+                return m["id"]
+    t = (state or {}).get("target")
+    return t["step"] if t else None
+
+
+def message(e, plan, btc=None, state=None):
+    """Zwięzły komunikat dla zdarzenia z plan.replay(): ceny do ustawienia + tunel stopnia."""
+    k = e["kind"]; t = e.get("target"); z = e.get("zone")
+    when = pl_time(e["t"]); c = e["price"]
+    head = f"Sonic {fmt(c)} (świeca 1h {when})"
+    L = []
+    if k in ("PREP_MID", "MID_SELL"):
+        m = e["mid"]
+        title = (f"Ustaw SPRZEDAŻ {fmt(m['limit'])} – krok {m['id']}" if k == "PREP_MID" else f"SPRZEDAJ {fmt(m['limit'])} – krok {m['id']}")
+        L = [head] + card_lines(plan, m["id"]) + ["Pośredni: sprzedaj, gdy cena zawraca; przy impecie trzymaj."]
+    elif k == "MID_REBUY":
+        m = e["mid"]
+        title = f"ODKUP {fmt(m['rebuy_limit'])} – po kroku {m['id']}"
+        L = [head, f"Jeśli sprzedałeś na {fmt(m['limit'])}: ODKUP {fmt(m['rebuy_limit'])} (widełki {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])})."]
+        nx = _after_mid_id(plan, state, m["id"]) or (t or {}).get("step")
+        if nx:
+            L += ["Następny stopień:"] + card_lines(plan, nx)
+    elif k == "MID_BREAKOUT":
+        m = e["mid"]
+        title = f"KUP NA WYBICIU ok. {fmt(c)} – po kroku {m['id']}"
+        L = [head, f"Jeśli sprzedałeś na {fmt(m['limit'])}: 2 zamkn. 1h > {fmt(m['breakout'])} – odkup teraz, odkup na dołku się nie wykonał."]
+        nx = _after_mid_id(plan, state, m["id"]) or (t or {}).get("step")
+        if nx:
+            L += ["Następny stopień:"] + card_lines(plan, nx)
+    elif k in ("SELL", "PREP_SELL"):
+        title = (f"SPRZEDAJ {fmt(t['limit'])} – {t['label']}" if k == "SELL" else f"Ustaw SPRZEDAŻ {fmt(t['limit'])} – {t['label']}")
+        L = [head] + card_lines(plan, t["step"])
+    elif k in ("BUY", "PREP_BUY", "BUY_BREAKOUT"):
+        lim = z["limit"] if k != "BUY_BREAKOUT" else c
+        title = {"BUY": f"KUP {fmt(lim)}", "PREP_BUY": f"Ustaw KUPNO {fmt(lim)}", "BUY_BREAKOUT": f"KUP NA WYBICIU ok. {fmt(c)}"}[k]
+        title += " – " + ("strefa akumulacji" if z["step"] == "start" else f"odkup po kroku {z['step']}")
+        L = [head]
+        if k == "BUY_BREAKOUT":
+            L.append(f"Odkup na dołku się nie wykonał: 2 zamkn. 1h > {fmt(e['level'])}.")
+        else:
+            L.append(f"KUP {fmt(z['limit'])}  (strefa {fmt(z['lo'])}–{fmt(z['hi'])})")
+        if t:
+            L += ["Następny stopień:"] + card_lines(plan, next_step_id(state) if state and state.get("phase") == "HOLD" else t["step"])
+    elif k in ("DEEP_TOUCH", "DEEP_LOST"):
+        sp, nz = e["support"], e.get("next_support")
+        if k == "DEEP_TOUCH":
+            title = f"Sonic {fmt(c)} w strefie wsparcia {sp['id']} {fmt(sp['lo'])}–{fmt(sp['hi'])}"
+        else:
+            title = f"Wsparcie {sp['id']} {fmt(sp['lo'])}–{fmt(sp['hi'])} przebite – Sonic {fmt(c)}"
+        L = [head, f"{sp['label']} ({sp['btc']})."]
+        if nz:
+            L.append(f"Niżej: {nz['id']} {fmt(nz['lo'])}–{fmt(nz['hi'])} ({nz['btc']})" +
+                     (f"; przebicie {sp['id']} = 2 zamkn. 1h < {fmt(sp['lo'])}" if k == "DEEP_TOUCH" else ""))
+        L += state_card(plan, state)
+    elif k == "STEP_FAIL":
+        sup = e.get("support") or {}
+        title = f"Odkup zawiódł – Sonic {fmt(c)}"
+        L = [head, f"2 zamkn. 1h < {fmt(z['lo'])}. Nie dokupuj. Następne wsparcie: {fmt(sup.get('lo'))}–{fmt(sup.get('hi'))}."]
+        L += state_card(plan, state)
+    else:
+        return _message_long(e, plan, btc)
+    b = _btc_short(btc)
+    if b:
+        L.append(b)
+    return title, "\n".join(L)
+
+
+def live_message(w, level, price, plan, btc=None, now_ts=None, state=None):
+    """Alert na żywo (świeca 1h w trakcie) – zwięźle. Zwraca (tytuł, treść, priorytet, tagi)."""
+    import time
+    when = pl_time(now_ts or int(time.time()))
+    k, t = w["kind"], w.get("target")
+    head = f"Sonic {fmt(price)} (teraz, {when})"
+    near = level == "near"
+    if k == "SELL":
+        title = (f"Blisko SPRZEDAŻY {fmt(t['limit'])} – {t['label']}" if near else f"SPRZEDAJ {fmt(t['limit'])} – cena w widełkach")
+        pr, tg = (4, ["hourglass"]) if near else (5, ["red_circle"])
+        L = [head] + card_lines(plan, t["step"])
+    elif k == "MID":
+        m = w["mid"]
+        title = (f"Blisko SPRZEDAŻY {fmt(m['limit'])} – krok {m['id']}" if near else f"SPRZEDAJ {fmt(m['limit'])} – krok {m['id']}")
+        pr, tg = (3, ["eyes"]) if near else (4, ["large_orange_diamond"])
+        L = [head] + card_lines(plan, m["id"]) + ["Pośredni: sprzedaj, gdy cena zawraca; przy impecie trzymaj."]
+    elif k == "MID_REBUY":
+        m = w["mid"]
+        title = (f"Blisko ODKUPU {fmt(m['rebuy_limit'])} – po kroku {m['id']}" if near else f"ODKUP {fmt(m['rebuy_limit'])} – po kroku {m['id']}")
+        pr, tg = (3, ["hourglass"]) if near else (4, ["large_blue_diamond"])
+        L = [head, f"Jeśli sprzedałeś na {fmt(m['limit'])}: ODKUP {fmt(m['rebuy_limit'])} (widełki {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])})."]
+        nx = _after_mid_id(plan, state, m["id"]) or (t or {}).get("step")
+        if nx:
+            L += ["Następny stopień:"] + card_lines(plan, nx)
+    elif k == "BUY":
+        z = w["zone"]
+        title = (f"Blisko KUPNA {fmt(z['limit'])}" if near else f"KUP {fmt(z['limit'])} – cena w strefie")
+        pr, tg = (4, ["hourglass"]) if near else (5, ["green_circle"])
+        L = [head, f"KUP {fmt(z['limit'])}  (strefa {fmt(z['lo'])}–{fmt(z['hi'])})"]
+        if t:
+            L += ["Następny stopień:"] + card_lines(plan, t["step"])
+    elif k == "BO_WATCH":
+        z = w["zone"]
+        title, pr, tg = f"Sonic przebija {fmt(z['breakout'])} – możliwe kupno na wybiciu", 4, ["eyes"]
+        L = [head, f"Kupno na wybiciu po 2 zamkn. 1h > {fmt(round(z['breakout'] * 1.01, 4))} – przyjdzie osobny sygnał."]
+    else:
+        return _live_message_long(w, level, price, plan, btc, now_ts)
+    b = _btc_short(btc)
+    if b:
+        L.append(b)
+    return title, "\n".join(L), pr, tg

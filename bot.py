@@ -373,7 +373,7 @@ def stoch_events(cfg, candles, src):
     return ev
 
 
-def stoch_message(e, plan, btc_ctx):
+def stoch_message(e, plan, btc_ctx, pst=None):
     when = N.pl_time(e["t"])
     if e["kind"] == "STOCH_TOP":
         iv = plan['stochrsi'].get('interval', '1h')
@@ -391,10 +391,8 @@ def stoch_message(e, plan, btc_ctx):
         iv = plan['stochrsi'].get('interval', '1h')
         title = f"StochRSI {iv} ≤ {plan['stochrsi']['bottom_level']} – możliwy dołek Sonica"
         lines = [f"Świeca {iv} {N.pl_time(e['t'] - e.get('sec', 3600))}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}, dołek świecy {P.fmt(e['low'])}."]
-    lines.append("Następny sygnał: " + ("dołek (StochRSI ≤ " + str(plan['stochrsi']['bottom_level']) + ")." if e["kind"] == "STOCH_TOP"
-                                        else "szczyt (StochRSI ≥ " + str(plan['stochrsi']['top_level']) + ")."))
-    lines.append(f"Dane: Binance {e['src']} {plan['stochrsi'].get('interval', '1h')}.")
-    bl = N.btc_line(btc_ctx)
+    lines += N.state_card(plan, pst)
+    bl = N._btc_short(btc_ctx)
     if bl:
         lines.append(bl)
     return title, "\n".join(lines)
@@ -532,7 +530,7 @@ async def main():
             continue
         if ck and lvl == "hit" and ck + ":hit" in sent_cls:
             confirm = True                # alert na żywo już był – teraz tylko potwierdzenie z zamkniętej świecy
-        ok, title, body = N.send_event(e, plan, btc_ctx, click=REPORT_URL, dry_run=DRY_RUN, confirm=confirm)
+        ok, title, body = N.send_event(e, plan, btc_ctx, click=REPORT_URL, dry_run=DRY_RUN, confirm=confirm, state=pst)
         if ok:
             sent.add(N.key(e))
             if ck:
@@ -550,7 +548,7 @@ async def main():
             k = f"{e['kind']}:{e['t']}"
             if k in sent or e["t"] < now_ts - 3 * 3600:
                 continue
-            title, body = stoch_message(e, plan, btc_ctx)
+            title, body = stoch_message(e, plan, btc_ctx, pst)
             if N.send(title, body, 4, ["chart_with_upwards_trend" if e["kind"] == "STOCH_TOP" else "chart_with_downwards_trend"], REPORT_URL, DRY_RUN):
                 sent.add(k)
                 log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ=e["kind"], krok=None, cena=e["price"], tytul=title, tresc=body))
@@ -629,7 +627,7 @@ async def live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx):
                             btc_ctx["price"] = bp
                             last_btc = time.time()
                     for key, lvl, w in alerts:
-                        title, body, pr, tg = N.live_message(w, lvl, price, plan, btc_ctx)
+                        title, body, pr, tg = N.live_message(w, lvl, price, plan, btc_ctx, state=pst)
                         if N.send(title, body, pr, tg, REPORT_URL, DRY_RUN):
                             sent_cls.add(key)
                             log.append(dict(wyslano=datetime.now(timezone.utc).isoformat(), czas_swiecy_pl="na żywo",
