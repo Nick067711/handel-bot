@@ -325,26 +325,39 @@ def stoch_rsi(closes, rl=14, sl=14, k=3, d=3):
     return K, D
 
 
-async def fetch_binance_1h(session, errors, symbol):
+IV_SEC = {"1h": 3600, "2h": 7200, "4h": 14400}
+
+
+async def fetch_binance_1h(session, errors, symbol, interval="1h"):
     url = "https://data-api.binance.vision/api/v3/klines"
-    d = await M.safe(M.get_json(session, url, {"symbol": symbol, "interval": "1h", "limit": 300}), f"Binance {symbol} 1h", errors)
+    d = await M.safe(M.get_json(session, url, {"symbol": symbol, "interval": interval, "limit": 1000}), f"Binance {symbol} {interval}", errors)
     if not d:
         return None
-    return A.closed_only([dict(t=int(k[0]) // 1000, o=float(k[1]), h=float(k[2]), l=float(k[3]), c=float(k[4]), v=float(k[5])) for k in d], period=3600)
+    return A.closed_only([dict(t=int(k[0]) // 1000, o=float(k[1]), h=float(k[2]), l=float(k[3]), c=float(k[4]), v=float(k[5])) for k in d],
+                         period=IV_SEC.get(interval, 3600))
 
 
 def stoch_events(cfg, candles, src):
-    """Przejście K w górę przez top_level i w dół do bottom_level na ostatnich zamkniętych świecach 1h."""
+    """Sygnały naprzemienne: po „szczycie” (K w górę przez top_level) czekamy na „dołek” (K w dół do bottom_level) i odwrotnie.
+    Odtwarzane od alternate_from z oczekiwaniem alternate_expect."""
     if not candles or len(candles) < 60:
         return []
+    sec = IV_SEC.get(cfg.get("interval", "1h"), 3600)
     K, D = stoch_rsi([c["c"] for c in candles], cfg["rsi_len"], cfg["stoch_len"], cfg["k_smooth"], cfg["d_smooth"])
     top, bot = cfg["top_level"], cfg["bottom_level"]
+    t_from = P.iso_ts(cfg["alternate_from"]) if cfg.get("alternate_from") else candles[-3]["t"]
+    expect = cfg.get("alternate_expect", "TOP")
     ev = []
-    for i in range(len(candles) - 3, len(candles)):
-        if i < 1 or K[i] is None or K[i - 1] is None:
+    for i in range(1, len(candles)):
+        if candles[i]["t"] + sec <= t_from or K[i] is None or K[i - 1] is None:
             continue
         c = candles[i]
-        if K[i] >= top > K[i - 1]:
+        if expect == "BOTTOM" and K[i] <= bot < K[i - 1]:
+            expect = "TOP"
+            ev.append(dict(kind="STOCH_BOTTOM", t=c["t"] + sec, k=K[i], d=D[i], price=c["c"], low=c["l"], src=src, sec=sec))
+            continue
+        if expect == "TOP" and K[i] >= top > K[i - 1]:
+            expect = "BOTTOM"
             # poprzedni szczyt K (>= 80) przed bieżącym wzrostem – do oceny dywergencji
             j = i - 1
             while j > 0 and K[j] is not None and K[j] < top:
@@ -354,19 +367,18 @@ def stoch_events(cfg, candles, src):
                 if K[m] is not None and K[m] >= 80 and (K[m - 1] is None or K[m] >= K[m - 1]) and (K[m + 1] is None or K[m] >= K[m + 1]):
                     prev = m
                     break
-            ev.append(dict(kind="STOCH_TOP", t=c["t"] + 3600, k=K[i], d=D[i], price=c["c"], high=c["h"],
-                           prev=(dict(t=candles[prev]["t"] + 3600, k=K[prev], price=max(x["h"] for x in candles[max(0, prev - 1):prev + 2])) if prev is not None else None),
-                           src=src))
-        if K[i] <= bot < K[i - 1]:
-            ev.append(dict(kind="STOCH_BOTTOM", t=c["t"] + 3600, k=K[i], d=D[i], price=c["c"], low=c["l"], src=src))
+            ev.append(dict(kind="STOCH_TOP", t=c["t"] + sec, k=K[i], d=D[i], price=c["c"], high=c["h"],
+                           prev=(dict(t=candles[prev]["t"] + sec, k=K[prev], price=max(x["h"] for x in candles[max(0, prev - 1):prev + 2])) if prev is not None else None),
+                           src=src, sec=sec))
     return ev
 
 
 def stoch_message(e, plan, btc_ctx):
     when = N.pl_time(e["t"])
     if e["kind"] == "STOCH_TOP":
-        title = f"StochRSI 1h ≥ {plan['stochrsi']['top_level']} – obserwuj szczyt Sonica"
-        lines = [f"Świeca 1h {N.pl_time(e['t'] - 3600)}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}."]
+        iv = plan['stochrsi'].get('interval', '1h')
+        title = f"StochRSI {iv} ≥ {plan['stochrsi']['top_level']} – obserwuj szczyt Sonica"
+        lines = [f"Świeca {iv} {N.pl_time(e['t'] - e.get('sec', 3600))}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}."]
         pv = e.get("prev")
         if pv:
             higher = e["high"] > pv["price"]
@@ -376,9 +388,12 @@ def stoch_message(e, plan, btc_ctx):
             elif not higher:
                 lines.append("Cena niżej niż przy poprzednim szczycie – niższy szczyt.")
     else:
-        title = f"StochRSI 1h ≤ {plan['stochrsi']['bottom_level']} – możliwy dołek Sonica"
-        lines = [f"Świeca 1h {N.pl_time(e['t'] - 3600)}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}, dołek świecy {P.fmt(e['low'])}."]
-    lines.append(f"Dane: Binance {e['src']} 1h.")
+        iv = plan['stochrsi'].get('interval', '1h')
+        title = f"StochRSI {iv} ≤ {plan['stochrsi']['bottom_level']} – możliwy dołek Sonica"
+        lines = [f"Świeca {iv} {N.pl_time(e['t'] - e.get('sec', 3600))}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}, dołek świecy {P.fmt(e['low'])}."]
+    lines.append("Następny sygnał: " + ("dołek (StochRSI ≤ " + str(plan['stochrsi']['bottom_level']) + ")." if e["kind"] == "STOCH_TOP"
+                                        else "szczyt (StochRSI ≥ " + str(plan['stochrsi']['top_level']) + ")."))
+    lines.append(f"Dane: Binance {e['src']} {plan['stochrsi'].get('interval', '1h')}.")
     bl = N.btc_line(btc_ctx)
     if bl:
         lines.append(bl)
@@ -475,7 +490,7 @@ async def main():
         scfg = plan.get("stochrsi") or {}
         if scfg.get("enabled"):
             for sym in (scfg.get("symbol", "SUSDC"), scfg.get("fallback_symbol", "SUSDT")):
-                st_candles = await fetch_binance_1h(session, errors, sym)
+                st_candles = await fetch_binance_1h(session, errors, sym, scfg.get("interval", "1h"))
                 if st_candles:
                     st_src = sym.replace("S", "S/", 1)
                     break

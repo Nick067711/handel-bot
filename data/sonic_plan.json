@@ -36,7 +36,8 @@
 
   "stochrsi": {
     "_opis": "Alerty StochRSI 1h Sonica na ntfy (prośba użytkownika 18.11.2026). TOP: linia STOCHRSI przechodzi w górę przez top_level (obserwuj szczyt; info o dywergencji z poprzednim szczytem). BOTTOM: linia schodzi do bottom_level (możliwy dołek). Dane: Binance S/USDC 1h (jak w aplikacji użytkownika), zapas S/USDT, potem Coinbase.",
-    "enabled": true, "symbol": "SUSDC", "fallback_symbol": "SUSDT",
+    "enabled": true, "symbol": "SUSDC", "fallback_symbol": "SUSDT", "interval": "1h",
+    "alternate_from": "2026-11-18T07:00:00Z", "alternate_expect": "TOP",
     "rsi_len": 7, "stoch_len": 7, "k_smooth": 3, "d_smooth": 3,
     "top_level": 58, "bottom_level": 5
   },
