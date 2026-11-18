@@ -8,7 +8,7 @@ Co robi przy każdym uruchomieniu:
   1. Pobiera świece dzienne Sonica z Coinbase i dokleja je do historii z data/SONIC_FTM_S_1d.csv,
      oraz świece 1h Sonica od początku planu (data/sonic_plan.json).
   2. Odtwarza plan etapowy na zamkniętych świecach 1h (plan.py): zakup, sprzedaż, odkup, kupno na wybiciu,
-     nieudany odkup, unieważnienie planu.
+     nieudany odkup, strefy wsparcia przy głębszej korekcie (unieważnienie wyłączone).
   3. Nowe kluczowe sygnały (z ostatnich godzin, jeszcze niewysłane) -> ntfy (notify.py).
   4. Raz dziennie (pierwsze uruchomienie po REPORT_HOUR_UTC) buduje pełny raport:
      dane BTC (on-chain, kontrakty, nastroje), księga zleceń Coinbase, wyszukiwanie w sieci i komentarz AI (Groq),
@@ -467,7 +467,8 @@ def plan_for_ai(pc):
     st = pc["state"]
     return dict(faza=st["phase"], co_robic_teraz=pc["action"],
                 cel_sprzedazy=(st.get("target") or {}).get("main"), strefa_zakupu=[(st.get("zone") or {}).get("lo"), (st.get("zone") or {}).get("hi")],
-                uniewaznienie_zamkniecie_dnia_ponizej=pc["plan"]["invalidation"]["daily_close_below"],
+                uniewaznienie="wyłączone (18.11.2026) – przy głębszej korekcie plan obowiązuje",
+                wsparcia_ponizej=[f"{z['id']} {z['lo']}–{z['hi']} ({z['label']}; {z['btc']})" for z in P.deep_zones(pc["plan"])],
                 ostatnie_sygnaly=[f"{N.pl_time(e['t'])} {e['kind']} {e.get('step')}" for e in pc["events"][-4:]],
                 uwaga="Plan etapowy jest nadrzędny. Komentarz ma się do niego odnosić, nie proponować innych poziomów wejścia/wyjścia.")
 

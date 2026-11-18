@@ -3,7 +3,7 @@
 Bot uruchamiany co godzinę przez GitHub Actions:
 
 - **ntfy** (temat `Sonic-buy-sell`) – tylko kluczowe sygnały planu etapowego, potwierdzone zamkniętą świecą 1h:
-  zakup, sprzedaż, kupno na wybiciu, „przygotuj zlecenie” (cena 2% od widełek), nieudany odkup, unieważnienie planu.
+  zakup, sprzedaż, kupno na wybiciu, „przygotuj zlecenie” (cena 2% od widełek), nieudany odkup, strefy wsparcia przy głębszej korekcie.
 - **Raport `index.html` na FTP** – raz dziennie (pierwsze uruchomienie po 05:00 UTC), plus kopia w `analiza/archiwum/RRRR-MM-DD.html`.
 
 ## Pliki
@@ -11,7 +11,7 @@ Bot uruchamiany co godzinę przez GitHub Actions:
 | Plik | Rola |
 |---|---|
 | `bot.py` | Uruchamia całość: dane → plan na świecach 1h → ntfy → raport → FTP. |
-| `data/sonic_plan.json` | **Plan etapowy** z 17.11.2026: kroki sprzedaży i odkupu z widełkami, daty orientacyjne, unieważnienie, poziomy BTC. Tu zmieniasz poziomy. |
+| `data/sonic_plan.json` | **Plan etapowy** z 17.11.2026: kroki sprzedaży i odkupu z widełkami, daty orientacyjne, strefy wsparcia poniżej planu (`deep_supports`), poziomy BTC. Tu zmieniasz poziomy. |
 | `plan.py` | Odtwarza plan na zamkniętych świecach 1h i wyznacza sygnały, bieżący krok i „co robić teraz”. |
 | `notify.py` | Treść i wysyłka powiadomień ntfy. |
 | `report_plan.py` | Mapa planu w raporcie (wykres historii od sierpnia 2026 + prognoza), tabela kroków, poziomy BTC. |
@@ -66,7 +66,10 @@ Bot startuje co godzinę tuż po pełnej godzinie: odtwarza plan od `start.from`
 | Odkup / wybicie po kroku pośrednim | tylko jeśli sprzedałeś na pośrednim |
 | Kupno na wybiciu | odkup się nie wykonał, 2 kolejne zamknięcia 1h ≥1% powyżej poprzedniego celu (przed tym ostrzeżenie na żywo) |
 | Odkup zawiódł | 2 zamknięcia 1h pod dolną granicą widełek, w których kupiliśmy |
-| Plan unieważniony | zamknięcie dnia poniżej 0,0300 |
+| Strefa wsparcia W1–W6 | korekta rozszerzona: cena weszła w strefę z historii Sonica (0,0300–0,0314, 0,0270–0,0280, 0,0248–0,0261, 0,0230–0,0235, 0,0206–0,0215, 0,0190–0,0196); podaje odpowiednik BTC i następne wsparcie |
+| Wsparcie przebite | 2 zamknięcia 1h pod dolną granicą strefy – następna strefa niżej |
+
+Unieważnienie planu jest wyłączone (18.11.2026): przy głębszej korekcie plan obowiązuje, poziomy wyżej bez zmian.
 
 Każdy sygnał idzie raz (ostrzeżenie i alert na żywo nie dublują się z sygnałami ze świec 1h).
 Kroki pośrednie nie zmieniają stanu planu – plan dalej trzyma pozycję do głównego celu.

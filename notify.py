@@ -7,7 +7,8 @@ Wysyłane są tylko kluczowe sygnały planu, potwierdzone zamkniętą świecą 1
   SELL              – cena w widełkach sprzedaży kroku,
   PREP_SELL/PREP_BUY – cena 2% od widełek: czas wystawić zlecenie z limitem,
   STEP_FAIL         – odkup zawiódł (2 zamknięcia 1h pod widełkami),
-  INVALID           – plan unieważniony (zamknięcie dnia poniżej 0,0300).
+  DEEP_TOUCH/DEEP_LOST – korekta rozszerzona: cena w strefie wsparcia poniżej planu / strefa przebita
+                       (unieważnienie planu wyłączone 18.11.2026).
 
 Sekrety: NTFY_TOPIC (wymagany), NTFY_URL (domyślnie https://ntfy.sh), NTFY_TOKEN (opcjonalny, gdy temat jest chroniony).
 """
@@ -21,13 +22,14 @@ NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
 
 PRIORITY = {"CHANNEL_BREAKOUT": 5, "PRE_BREAKOUT": 3, "UPDATE_2D": 4, "INVALID": 5, "SELL": 5, "BUY": 5, "BUY_BREAKOUT": 5, "STEP_FAIL": 4, "PREP_SELL": 4, "PREP_BUY": 4,
-            "PREP_MID": 3, "MID_SELL": 4, "MID_REBUY": 4, "MID_BREAKOUT": 4, "CONFIRM": 3}
+            "PREP_MID": 3, "MID_SELL": 4, "MID_REBUY": 4, "MID_BREAKOUT": 4, "CONFIRM": 3,
+            "DEEP_TOUCH": 4, "DEEP_LOST": 4}
 TAGS = {"CHANNEL_BREAKOUT": ["rocket"], "PRE_BREAKOUT": ["eyes"], "UPDATE_2D": ["memo"], "INVALID": ["no_entry"], "SELL": ["red_circle"], "BUY": ["green_circle"], "BUY_BREAKOUT": ["rocket"],
         "STEP_FAIL": ["warning"], "PREP_SELL": ["hourglass"], "PREP_BUY": ["hourglass"], "PREP_MID": ["eyes"],
         "MID_SELL": ["large_orange_diamond"], "MID_REBUY": ["large_blue_diamond"], "MID_BREAKOUT": ["large_blue_diamond"],
-        "CONFIRM": ["white_check_mark"]}
+        "CONFIRM": ["white_check_mark"], "DEEP_TOUCH": ["anchor"], "DEEP_LOST": ["arrow_down"]}
 STRENGTH = {"CHANNEL_BREAKOUT": 2, "PRE_BREAKOUT": 1, "UPDATE_2D": 2, "PREP_SELL": 1, "PREP_BUY": 1, "PREP_MID": 1, "SELL": 2, "BUY": 2, "BUY_BREAKOUT": 2, "STEP_FAIL": 2, "INVALID": 3,
-            "MID_SELL": 2, "MID_REBUY": 2, "MID_BREAKOUT": 2}
+            "MID_SELL": 2, "MID_REBUY": 2, "MID_BREAKOUT": 2, "DEEP_TOUCH": 2, "DEEP_LOST": 2}
 
 
 def pl_time(ts):
@@ -95,7 +97,6 @@ def message(e, plan, btc=None):
     """(tytuł, treść) dla zdarzenia z plan.replay()."""
     k = e["kind"]; t = e.get("target"); z = e.get("zone")
     when = pl_time(e["t"])
-    inv = plan["invalidation"]["daily_close_below"]
     lines = []
     if k == "BUY":
         if z["step"] == "start":
@@ -106,7 +107,6 @@ def message(e, plan, btc=None):
             lines.append(f"Świeca 1h zamknięta {when}: cena w strefie odkupu {fmt(z['lo'])}–{fmt(z['hi'])}. Limit {fmt(z['limit'])} (górna granica – wariant ostrożny).")
         if t:
             lines.append(f"Od razu ustaw sprzedaż z limitem: {t['label']} {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}, główny poziom {fmt(t['main'])}).")
-        lines.append(f"Unieważnienie planu: zamknięcie dnia poniżej {fmt(inv)}.")
     elif k == "BUY_BREAKOUT":
         title = "KUPNO NA WYBICIU – Sonic"
         lines.append(f"Odkup się nie wykonał, a 2 kolejne świece 1h zamknęły się powyżej {fmt(e['level'])} (ostatnia {when}, {fmt(e['price'])}).")
@@ -143,8 +143,7 @@ def message(e, plan, btc=None):
         title = "Uwaga: odkup zawiódł – Sonic"
         s = e.get("support") or {}
         lines.append(f"Dwa zamknięcia 1h poniżej {fmt(z['lo'])} (ostatnie {when}, {fmt(e['price'])}).")
-        lines.append(f"Nie dokupuj. Następne wsparcie z mapy: {fmt(s.get('lo'))}–{fmt(s.get('hi'))}. "
-                     f"Plan obowiązuje, dopóki zamknięcie dnia jest powyżej {fmt(inv)}.")
+        lines.append(f"Nie dokupuj. Następne wsparcie z mapy: {fmt(s.get('lo'))}–{fmt(s.get('hi'))}. Plan obowiązuje dalej.")
     elif k in ("PREP_MID", "MID_SELL"):
         m = e["mid"]
         title = (f"Krok pośredni: Sonic blisko {fmt(m['main'])}" if k == "PREP_MID" else f"KROK POŚREDNI – Sonic w strefie {fmt(m['lo'])}–{fmt(m['hi'])}")
@@ -198,9 +197,22 @@ def message(e, plan, btc=None):
         amt = amounts_text(plan, "sell", "1a") if sell else ""
     elif k == "INVALID":
         title = "PLAN UNIEWAŻNIONY – Sonic"
-        nx = plan["invalidation"]["next_supports"]
-        lines.append(f"Zamknięcie dnia {fmt(e['close'])} poniżej {fmt(inv)}. Scenariusz hossy wstrzymany.")
-        lines.append(f"Kolejne wsparcia: {', '.join(fmt(x) for x in nx)}. Nowy plan po analizie.")
+        lines.append(f"Zamknięcie dnia {fmt(e['close'])} poniżej poziomu unieważnienia. Scenariusz hossy wstrzymany.")
+    elif k in ("DEEP_TOUCH", "DEEP_LOST"):
+        z, nz = e["support"], e.get("next_support")
+        nxt = f"{nz['id']} {fmt(nz['lo'])}–{fmt(nz['hi'])} ({nz['label']}; {nz['btc']})" if nz else "brak – dno cyklu"
+        if k == "DEEP_TOUCH":
+            title = f"Sonic w strefie wsparcia {z['id']} {fmt(z['lo'])}–{fmt(z['hi'])}"
+            lines.append(f"Świeca 1h zamknięta {when}: dołek {fmt(e.get('low'))}, cena {fmt(e['price'])} – strefa: {z['label']} ({z['why']}).")
+            lines.append(f"Odpowiednik: {z['btc']} Plan obowiązuje (bez unieważnienia), poziomy wyżej bez zmian." if z['btc'].endswith('.') else
+                         f"Odpowiednik: {z['btc']}. Plan obowiązuje (bez unieważnienia), poziomy wyżej bez zmian.")
+            lines.append("Jeśli jesteś w gotówce – to strefa do zakupu; odbicie od wsparcia typowo do starych poziomów: "
+                         "0,0315 → 0,0327 → 0,0342/0,0346 → 0,0362.")
+            lines.append(f"Przebicie strefy (2 zamknięcia 1h pod {fmt(z['lo'])}) → następne wsparcie: {nxt}.")
+        else:
+            title = f"Wsparcie {z['id']} przebite – Sonic"
+            lines.append(f"Dwa zamknięcia 1h pod {fmt(z['lo'])} (ostatnie {when}, {fmt(e['price'])}). Strefa {fmt(z['lo'])}–{fmt(z['hi'])} nie utrzymała ceny.")
+            lines.append(f"Następne wsparcie: {nxt}. Nie kupuj w spadającym nożu – czekaj na wejście w kolejną strefę.")
     else:
         title, lines = k, [str(e)]
     if k not in ("CHANNEL_BREAKOUT", "PRE_BREAKOUT", "UPDATE_2D"):
@@ -321,7 +333,7 @@ def confirm_message(e, plan, btc=None):
     elif k in ("BUY", "MID_REBUY"):
         z = e["zone"] if k == "BUY" else dict(lo=e["mid"]["rebuy_lo"], hi=e["mid"]["rebuy_hi"])
         if c < z["lo"]:
-            verdict = f"zamknęła się POD strefą ({fmt(c)}) – presja podaży; nie dokładaj, plan obowiązuje do zamknięcia dnia poniżej {fmt(plan['invalidation']['daily_close_below'])}."
+            verdict = f"zamknęła się POD strefą ({fmt(c)}) – presja podaży; nie dokładaj, kolejne wsparcia w alertach korekty rozszerzonej."
         elif c <= z["hi"]:
             verdict = f"zamknęła się w strefie ({fmt(c)}, dołek {fmt(e.get('low'))})."
         else:

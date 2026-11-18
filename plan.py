@@ -134,9 +134,52 @@ def all_levels(plan):
         if s.get("rebuy"):
             out.append(dict(price=s["rebuy"], lo=s["rebuy_range"][0], hi=s["rebuy_range"][1], kind="rebuy", step=s["id"],
                             name=f"Odkup po: {s['label']} {fmt(s['rebuy'])}"))
-    out.append(dict(price=plan["invalidation"]["daily_close_below"], lo=None, hi=None, kind="invalid", step=None,
-                    name="Unieważnienie planu (zamknięcie dnia poniżej)"))
+    for z in deep_zones(plan):
+        out.append(dict(price=round((z["lo"] + z["hi"]) / 2, 5), lo=z["lo"], hi=z["hi"], kind="support", step=z["id"],
+                        name=f"Wsparcie {z['id']} {fmt(z['lo'])}–{fmt(z['hi'])} ({z['label']})"))
     return out
+
+
+def deep_zones(plan):
+    """Strefy wsparcia poniżej planu (korekta rozszerzona), od najwyższej."""
+    return sorted((plan.get("deep_supports") or {}).get("zones") or [], key=lambda z: -z["hi"])
+
+
+def invalidation_level(plan):
+    """Poziom unieważnienia albo None, gdy wyłączone."""
+    inv = plan.get("invalidation") or {}
+    if inv.get("enabled") is False:
+        return None
+    return inv.get("daily_close_below")
+
+
+def deep_events(plan, candles_1h, t_from):
+    """DEEP_TOUCH – pierwsze wejście ceny w strefę wsparcia; DEEP_LOST – 2 zamknięcia 1h pod dolną granicą."""
+    ds = plan.get("deep_supports") or {}
+    zones = deep_zones(plan)
+    if not zones:
+        return []
+    need = ds.get("lost_closes_1h", 2)
+    st = {z["id"]: dict(touched=False, lost=False, below=0) for z in zones}
+    ev = []
+    for c in candles_1h:
+        if c["t"] < t_from:
+            continue
+        for i, z in enumerate(zones):
+            s = st[z["id"]]
+            below = [x for x in zones[i + 1:]]
+            nxt = below[0] if below else None
+            if not s["touched"] and c["l"] <= z["hi"]:
+                s["touched"] = True
+                ev.append(dict(kind="DEEP_TOUCH", t=c["t"] + HOUR, step=z["id"], price=c["c"], high=c["h"], low=c["l"],
+                               support=z, next_support=nxt))
+            if s["touched"] and not s["lost"]:
+                s["below"] = s["below"] + 1 if c["c"] < z["lo"] else 0
+                if s["below"] >= need:
+                    s["lost"] = True
+                    ev.append(dict(kind="DEEP_LOST", t=c["t"] + HOUR, step=z["id"], price=c["c"], high=c["h"], low=c["l"],
+                                   support=z, next_support=nxt))
+    return ev
 
 
 def fmt(x):
@@ -234,7 +277,7 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
     above = below = 0
     armed = False
     invalid = False
-    inv_level = plan["invalidation"]["daily_close_below"]
+    inv_level = invalidation_level(plan)
     daily_closes = {c["t"] // 86400: c["c"] for c in (daily or [])}
 
     def ev(kind, c, **kw):
@@ -244,7 +287,7 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
         if c["t"] < t_from:
             continue
         # unieważnienie planu: zamknięcie dnia poprzedniego poniżej poziomu
-        if not invalid and c["t"] % 86400 == 0:
+        if inv_level is not None and not invalid and c["t"] % 86400 == 0:
             prev = daily_closes.get(c["t"] // 86400 - 1)
             if prev is not None and prev < inv_level:
                 invalid = True
@@ -320,7 +363,8 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
                     ev("STEP_FAIL", c, step=last_fill["step"], zone=last_fill, support=sup, target=target)
 
     first_sell = next((e["t"] for e in events if e["kind"] == "SELL"), None)
-    events = sorted(events + channel_events(plan, candles_1h, t_from, first_sell), key=lambda e: e["t"])
+    events = sorted(events + channel_events(plan, candles_1h, t_from, first_sell) + deep_events(plan, candles_1h, t_from),
+                    key=lambda e: e["t"])
     last = candles_1h[-1] if candles_1h else None
     state = dict(phase="INVALID" if invalid else phase, zone=zone if phase == "BUY" else None,
                  target=target, last_fill=last_fill, price=last["c"] if last else None,
@@ -335,10 +379,13 @@ def next_support(plan, below_price):
         z = buy_zone(plan, s["id"])
         if z and z["hi"] < below_price:
             zones.append(z)
-    return max(zones, key=lambda z: z["hi"]) if zones else dict(lo=plan["invalidation"]["next_supports"][0],
-                                                                hi=plan["invalidation"]["next_supports"][0],
-                                                                main=plan["invalidation"]["next_supports"][0],
-                                                                label="wsparcie po unieważnieniu planu", step=None)
+    if zones:
+        return max(zones, key=lambda z: z["hi"])
+    deep = [z for z in deep_zones(plan) if z["hi"] < below_price] or deep_zones(plan)[-1:]
+    if deep:
+        z = deep[0]
+        return dict(lo=z["lo"], hi=z["hi"], main=round((z["lo"] + z["hi"]) / 2, 5), label=f"wsparcie {z['id']} – {z['label']}", step=None)
+    return None
 
 
 # ----------------------------------------------------------------- położenie ceny na mapie planu
@@ -359,9 +406,8 @@ def next_action(plan, state):
     """Jedno zdanie: co robić teraz według planu."""
     ph = state["phase"]
     if ph == "INVALID":
-        inv = plan["invalidation"]
-        return (f"Plan unieważniony (zamknięcie dnia poniżej {fmt(inv['daily_close_below'])}). "
-                f"Gotówka; kolejne wsparcia {', '.join(fmt(x) for x in inv['next_supports'])}.")
+        return (f"Plan unieważniony (zamknięcie dnia poniżej {fmt(invalidation_level(plan))}). "
+                f"Gotówka; kolejne wsparcia {', '.join(fmt(z['lo']) + '–' + fmt(z['hi']) for z in deep_zones(plan)[:2])}.")
     if ph == "DONE":
         return "Plan zakończony – finał hossy zrealizowany. Gotówka."
     t = state.get("target")

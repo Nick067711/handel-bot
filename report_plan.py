@@ -170,12 +170,18 @@ def projection_chart_svg(pc, sonic, mobile=False):
         P.append(f'<line x1="{L}" x2="{L + pw:.1f}" y1="{y:.1f}" y2="{y:.1f}" class="grid"/>')
         P.append(f'<text x="{L + pw + 6:.1f}" y="{y + fs / 3:.1f}" class="axis" style="font-size:{fs}px">{("0," + f"{v:.2f}"[2:]).rstrip("0")}</text>')
 
-    # linie poziome: unieważnienie, SMA100, potwierdzenie etapu 1 (etykiety w części historycznej)
-    inv = plan["invalidation"]["daily_close_below"]
+    # strefy wsparcia poniżej planu (korekta rozszerzona) – pasy przez cały wykres, etykieta przy prawej krawędzi
+    from plan import deep_zones
+    for j, z in enumerate(deep_zones(plan)):
+        y1, y2 = ly(z["hi"]), ly(z["lo"])
+        P.append(f'<rect x="{L}" y="{y1:.1f}" width="{pw:.1f}" height="{max(1.5, y2 - y1):.1f}" class="dz"/>')
+        if not mobile or j < 3:
+            T.append((L + pw - 4, (y1 + y2) / 2 + sm / 3, [(f"{z['id']} {fmt(z['lo'])}–{fmt(z['hi'])}", "dz-t", sm)], "end", 1))
+
+    # linie poziome: SMA100, potwierdzenie etapu 1 (etykiety w części historycznej)
     conf = plan["confirmations"]["stage1_confirm_daily_close_above"]
     sma100 = (pc.get("confirm") or {}).get("sonic_sma100")
-    hl = [(inv, "neg", f"unieważnienie planu: zamknięcie dnia < {fmt(inv)}", +1, "end"),
-          (conf, "mut", f"potwierdzenie etapu 1: {fmt(conf)}", -1, "start")]
+    hl = [(conf, "mut", f"potwierdzenie etapu 1: {fmt(conf)}", -1, "start")]
     if sma100:
         hl.append((sma100, "mut2", f"SMA100 {fmt(sma100)}", -1, "end"))
     for v, cls, txt, d, anc in hl:
@@ -398,13 +404,14 @@ def capital_table(pc):
 
 # ----------------------------------------------------------------- „gdzie jesteśmy”
 KIND_PL = {"MID_SELL": "krok pośredni – strefa", "MID_REBUY": "odkup po pośrednim", "MID_BREAKOUT": "wybicie nad pośrednim", "PREP_MID": "zbliża się do pośredniego", "BUY": "zakup", "BUY_BREAKOUT": "kupno na wybiciu", "SELL": "sprzedaż", "PREP_SELL": "przygotuj sprzedaż",
-           "PREP_BUY": "przygotuj zakup", "STEP_FAIL": "odkup zawiódł", "INVALID": "plan unieważniony"}
+           "PREP_BUY": "przygotuj zakup", "STEP_FAIL": "odkup zawiódł", "INVALID": "plan unieważniony",
+           "DEEP_TOUCH": "strefa wsparcia (korekta rozszerzona)", "DEEP_LOST": "wsparcie przebite"}
 
 
 def where_block(pc):
     from notify import pl_time
     st, pos, price = pc["state"], pc["position"], pc["price"]
-    inv = pc["plan"]["invalidation"]["daily_close_below"]
+    from plan import deep_zones
     ph = {"BUY": "czekamy na zakup", "HOLD": "w pozycji – czekamy na sprzedaż", "INVALID": "plan unieważniony",
           "DONE": "plan zakończony"}[st["phase"]]
     t = st.get("target") or {}
@@ -424,7 +431,11 @@ def where_block(pc):
         elif m["status"] == "touched":
             kv.append((f"Po pośrednim {E(m['id'])}", f"jeśli sprzedałeś: odkup {fmt(m['rebuy_lo'])}–{fmt(m['rebuy_hi'])} albo wybicie nad {fmt(m['breakout'])}"))
     kv.append(("Do szczytu etapu 1 / 2", f"{fpc(pos['to_stage1_top_pct'])} / {fpc(pos['to_stage2_top_pct'])}"))
-    kv.append(("Do unieważnienia planu", f"{fpc(pct(inv, price))} (zamknięcie dnia poniżej {fmt(inv)})"))
+    below = [z for z in deep_zones(pc["plan"]) if z["lo"] < price][:2]
+    if below:
+        kv.append(("Wsparcia poniżej (korekta rozszerzona)", "; ".join(
+            f"{E(z['id'])} {fmt(z['lo'])}–{fmt(z['hi'])} ({fpc(pct(min(z['hi'], price), price))}, {E(z['btc'])})" for z in below)))
+    kv.append(("Unieważnienie planu", "wyłączone – przy głębszej korekcie plan obowiązuje, poziomy wyżej bez zmian"))
     bars = "".join(
         f"<div class='meter'><p>{E(name)}: <strong>{v:.0f}%</strong> drogi (skala log.)</p><div class='mtrack'><div class='mfill' style='width:{v:.0f}%'></div></div></div>"
         for name, v in (("Etap 1: od strefy zakupu do szczytu 0,071", pos["progress_stage1"]),
@@ -478,7 +489,7 @@ PLAN_CSS = """
 .pmap .ph-bg{fill:#ffffff;opacity:.03}.pmap .ph-t{fill:var(--muted);letter-spacing:.08em;text-transform:uppercase}
 .pmap .wick{stroke:var(--sonic);stroke-width:1;opacity:.28}.pmap .leader{stroke:var(--muted);stroke-width:.8;opacity:.6}.pmap .grid{stroke:var(--line);stroke-width:1;opacity:.45}.pmap .lg{font-weight:700}
 .pmap .brk{stroke:var(--line);stroke-width:1.5;stroke-dasharray:2 5}
-.pmap .hl-neg{stroke:var(--neg);stroke-width:1.2;stroke-dasharray:6 4}.pmap .hl-neg-t{fill:var(--neg)}
+.pmap .hl-neg{stroke:var(--neg);stroke-width:1.2;stroke-dasharray:6 4}.pmap .dz{fill:var(--pos);opacity:.07}.pmap .dz-t{fill:var(--pos);opacity:.75}.pmap .hl-neg-t{fill:var(--neg)}
 .pmap .hl-mut{stroke:var(--muted);stroke-width:1;stroke-dasharray:6 4;opacity:.7}.pmap .hl-mut-t{fill:var(--muted)}
 .pmap .hl-mut2{stroke:var(--muted);stroke-width:1;stroke-dasharray:2 4;opacity:.6}.pmap .hl-mut2-t{fill:var(--muted)}
 .pmap .z-sell{fill:var(--neg);opacity:.16}.pmap .z-buy{fill:var(--pos);opacity:.16}.pmap .z-chk{fill:var(--muted);opacity:.12}
@@ -502,7 +513,7 @@ table.steps td{vertical-align:top}table.cap tr.tot td{border-top:2px solid var(-
 .plan-legend{display:flex;flex-wrap:wrap;gap:6px 18px;color:var(--muted);font-size:.85rem;margin:4px 0 0;padding:0;list-style:none}
 .plan-legend i{display:inline-block;width:12px;height:12px;border-radius:2px;margin-right:6px;vertical-align:-1px}
 .plan-legend .l-h{height:3px;background:var(--sonic)}.plan-legend .l-p{height:0;border-top:2px dashed var(--sonic)}
-.plan-legend .l-m{border:1.5px dashed var(--warn);background:none}.plan-legend .l-s{background:var(--neg);opacity:.5}.plan-legend .l-b{background:var(--pos);opacity:.5}.plan-legend .l-i{height:0;border-top:2px dashed var(--neg)}
+.plan-legend .l-m{border:1.5px dashed var(--warn);background:none}.plan-legend .l-s{background:var(--neg);opacity:.5}.plan-legend .l-b{background:var(--pos);opacity:.5}.plan-legend .l-i{height:0;border-top:2px dashed var(--neg)}.plan-legend .l-z{background:var(--pos);opacity:.25}
 """
 
 
@@ -510,7 +521,7 @@ def plan_section(pc, sonic):
     leg = ("<ul class='plan-legend'><li><i class='l-h'></i>cena (zamknięcia dzienne)</li><li><i class='l-p'></i>prognoza wg planu</li>"
            "<li><i class='l-s'></i>widełki sprzedaży</li><li><i class='l-b'></i>widełki zakupu/odkupu</li>"
            + 
-           ("<li><i class='l-m'></i>krok pośredni (decyzja na gorąco)</li>" if show_mids(pc) else "") + "<li><i class='l-i'></i>unieważnienie planu</li><li>mocniej podświetlona strefa = bieżący krok</li></ul>")
+           ("<li><i class='l-m'></i>krok pośredni (decyzja na gorąco)</li>" if show_mids(pc) else "") + "<li><i class='l-z'></i>strefy wsparcia W1–W6 (korekta rozszerzona)</li><li>mocniej podświetlona strefa = bieżący krok</li></ul>")
     meta = pc["plan"]["meta"]
     return (f"<h3>Mapa planu: historia od sierpnia 2026 i prognoza</h3>"
             f"<p class='muted'>{E(meta['basis'])} {E(meta['tempo_note'])}</p>"

@@ -58,9 +58,27 @@
   },
 
   "invalidation": {
-    "daily_close_below": 0.0300,
-    "next_supports": [0.0253, 0.0190],
+    "enabled": false,
+    "note": "Wyłączone 18.11.2026 na prośbę użytkownika: plan nie jest unieważniany. Głębsza korekta = strefy wsparcia poniżej (deep_supports); poziomy wyżej bez zmian.",
     "step_rule": "dwa kolejne zamknięcia 1h pod dolną granicą widełek odkupu = odkup zawiódł; nie dokupować, czekać na następne wsparcie z mapy"
+  },
+  "deep_supports": {
+    "note": "Korekta rozszerzona – strefy z historii Sonica (dołki/szczyty 4h od 06.2026, profil wolumenu Binance). Alert przy wejściu w strefę i przy przebiciu (2 zamknięcia 1h pod dolną granicą). Odbicie od strefy – do starych poziomów: 0,0315 → 0,0327 → 0,0342/0,0346 → 0,0362.",
+    "lost_closes_1h": 2,
+    "zones": [
+      {"id": "W1", "lo": 0.0300, "hi": 0.0314, "label": "Górna granica zakresu sie–wrz 2026",
+       "why": "szczyty 0,0302–0,0314 (22.08–07.09) i duży wolumen 0,0305–0,0310", "btc": "BTC ok. 61–62 tys."},
+      {"id": "W2", "lo": 0.0270, "hi": 0.0280, "label": "Dołki cze/sie 2026",
+       "why": "dołki 0,0270–0,0275 (06.06, 25–26.08) i największy wolumen w paśmie 0,0280", "btc": "BTC ok. 58–60 tys."},
+      {"id": "W3", "lo": 0.0248, "hi": 0.0261, "label": "Dołki wrz 2026",
+       "why": "dołki 0,0248 (16.09), 0,0259–0,0261 (23.08, 02.09) i duży wolumen 0,0250–0,0260", "btc": "BTC ok. 53–57 tys."},
+      {"id": "W4", "lo": 0.0230, "hi": 0.0235, "label": "Dołki lip 2026",
+       "why": "dołki 0,0232–0,0235 (29.06, 20.07) i duży wolumen 0,0230", "btc": "BTC ok. 50–54 tys."},
+      {"id": "W5", "lo": 0.0206, "hi": 0.0215, "label": "Dołek startowy hossy",
+       "why": "dołki 0,0206 (31.07), 0,0209 (18.08), 0,0215 (27.06)", "btc": "BTC poniżej 50 tys."},
+      {"id": "W6", "lo": 0.0190, "hi": 0.0196, "label": "Dno cyklu 25.06.2026",
+       "why": "dołek 0,01901", "btc": "skrajny scenariusz"}
+    ]
   },
 
   "confirmations": {
