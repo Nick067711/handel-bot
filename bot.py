@@ -640,5 +640,55 @@ async def live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx):
     print(f"[live] koniec czuwania, sprawdzeń ceny: {n}")
 
 
+RUN_MINUTES = int(os.getenv("RUN_MINUTES", "0"))   # >0: tryb ciągły – cykl co godzinę przez tyle minut (GitHub Actions max ok. 6 h)
+REPO_PUSH = os.getenv("REPO_PUSH", "0") == "1"      # po każdym cyklu wypchnij folder raport/ do repozytorium
+
+
+def push_repo():
+    """Zapisuje zmiany w raport/ w repozytorium (tryb ciągły – żeby kopia była aktualna co godzinę)."""
+    import subprocess
+    def git(*a):
+        return subprocess.run(["git", *a], capture_output=True, text=True)
+    git("add", "raport/")
+    if git("diff", "--cached", "--quiet").returncode == 0:
+        return
+    git("-c", "user.name=handel-bot", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
+        "commit", "-q", "-m", f"Raport bota {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC [skip ci]")
+    branch = os.getenv("GITHUB_REF_NAME", "main")
+    for _ in range(3):
+        if git("pull", "-q", "--rebase", "origin", branch).returncode == 0 and \
+                git("push", "-q", "origin", f"HEAD:{branch}").returncode == 0:
+            print("[repo] raport/ wypchnięty")
+            return
+        time.sleep(5)
+    print("[repo] nie udało się wypchnąć raport/ – spróbuję w następnym cyklu")
+
+
+def run_forever():
+    end = time.time() + RUN_MINUTES * 60
+    n = 0
+    while True:
+        n += 1
+        print(f"===== cykl {n} =====", flush=True)
+        try:
+            asyncio.run(main())
+        except SystemExit as ex:
+            print(f"[cykl] zakończony kodem {ex.code}")
+        except Exception as ex:
+            import traceback
+            traceback.print_exc()
+            print(f"[cykl] błąd: {type(ex).__name__}: {ex}")
+        if REPO_PUSH:
+            push_repo()
+        nxt = (int(time.time()) // 3600 + 1) * 3600 + 60      # minuta po zamknięciu kolejnej świecy 1h
+        if nxt + 600 > end:
+            print(f"[tryb ciągły] koniec po {n} cyklach – następne uruchomienie przejmie czuwanie")
+            break
+        time.sleep(max(0, nxt - time.time()))
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    if RUN_MINUTES:
+        run_forever()
+    else:
+        asyncio.run(main())

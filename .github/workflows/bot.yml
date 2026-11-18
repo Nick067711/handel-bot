@@ -2,7 +2,7 @@ name: Sonic & BTC – monitor i raport
 
 on:
   schedule:
-    - cron: '1 * * * *'   # co godzinę, tuż po zamknięciu świecy 1h; potem czuwanie na żywo do :56 (GitHub potrafi opóźnić start)
+    - cron: '7 * * * *'   # zapas: GitHub uruchamia harmonogram nieregularnie; właściwe czuwanie to łańcuch długich uruchomień (patrz ostatni krok)
   workflow_dispatch:
     inputs:
       force_report:
@@ -16,11 +16,12 @@ concurrency:
 
 permissions:
   contents: write     # bot zapisuje kopię raportu i sygnałów w folderze raport/
+  actions: write      # uruchomienie kolejnej zmiany czuwania (łańcuch)
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 355
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -44,7 +45,9 @@ jobs:
           FTP_HOST: ${{ secrets.FTP_HOST }}
           FTP_USER: ${{ secrets.FTP_USER }}
           FTP_PASS: ${{ secrets.FTP_PASS }}
-          LIVE_UNTIL_MINUTE: "56"   # po części godzinowej bot czuwa na żywo (co minutę) do :56
+          LIVE_UNTIL_MINUTE: "59"   # po części godzinowej bot czuwa na żywo (co minutę) do :59
+          RUN_MINUTES: "335"        # tryb ciągły: cykl co godzinę przez ok. 5,5 h, potem kolejne uruchomienie
+          REPO_PUSH: "1"            # po każdym cyklu wypchnij raport/
           FORCE_REPORT: ${{ github.event_name == 'workflow_dispatch' && inputs.force_report && '1' || '0' }}
           PYTHONIOENCODING: "utf-8"
           LANG: "C.UTF-8"
@@ -64,3 +67,10 @@ jobs:
             sleep 5
           done
           echo "Nie udało się wypchnąć raportu (spróbuje przy następnym uruchomieniu)"
+
+      - name: Uruchom kolejną zmianę czuwania (łańcuch bez przerw)
+        if: always() && github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run bot.yml --ref "${GITHUB_REF_NAME}" -f force_report=false || echo "Nie udało się uruchomić kolejnej zmiany – przejmie harmonogram"

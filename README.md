@@ -103,3 +103,10 @@ DRY_RUN=1 python bot.py
 ```
 
 Raport zapisze się jako `index.html` w bieżącym folderze, a treść ewentualnych powiadomień ntfy pojawi się w konsoli.
+
+## Czuwanie bez przerw (od 18.11.2026)
+
+Harmonogram GitHuba (`schedule`) jest zawodny – 18.11 uruchomił bota tylko 3 razy w ciągu doby. Dlatego bot działa teraz
+w trybie ciągłym: jedno uruchomienie trwa ok. 5,5 h (`RUN_MINUTES`), co godzinę po zamknięciu świecy 1h robi pełny cykl
+(sygnały planu, strefy wsparcia, StochRSI), między cyklami czuwa na żywo co minutę, po każdym cyklu wypycha `raport/`,
+a na końcu sam uruchamia kolejną zmianę (`gh workflow run`). Harmonogram co godzinę zostaje tylko jako zapas.
