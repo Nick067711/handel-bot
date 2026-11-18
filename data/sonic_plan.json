@@ -58,10 +58,10 @@
     {"id": "start", "stage": 1, "label": "Start – akumulacja",
      "buy": 0.0330, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0334,
      "eta": "2026-11-17", "note": "Kupione 17.11.2026 ok. 17:01: 99 300 S po średnio ok. 0,0330 (Coinbase, zlecenie rynkowe, po odbiciu BTC od 63 336)"},
-    {"id": "0b", "stage": 1, "label": "Pośredni 0b – obronny (górna granica przedziału)", "intermediate": true,
-     "sell": 0.0340, "sell_range": [0.0338, 0.0342], "eta": "2026-11-18",
-     "rebuy": 0.0321, "rebuy_range": [0.0320, 0.0322], "rebuy_eta": "2026-11-19", "breakout": 0.0346,
-     "note": "Krok OBRONNY dodany 17.11.2026 po zakupie po 0,0330: sprzedaż 0,0338–0,0340 TYLKO gdy BTC jest słaby (odrzucenie przy 64 500–65 200, kolejny niższy szczyt, odpływy z ETF / ujemne tło). Gdy BTC wybija – trzymać do kroku 1 (0,0392). Odkup 0,0320–0,0322, a przy wybiciu: 2 zamknięcia 1h nad 0,0346."},
+    {"id": "0b", "stage": 1, "label": "Pośredni 0b – góra obecnego trójkąta", "intermediate": true,
+     "sell": 0.0341, "sell_range": [0.0340, 0.0342], "eta": "2026-11-18",
+     "rebuy": 0.0329, "rebuy_range": [0.0328, 0.0330], "rebuy_eta": "2026-11-19", "breakout": 0.0346,
+     "note": "Trójkąt z wyższymi dołkami (ok. 0,0327–0,0329) i górą 0,0340–0,0342. Sprzedaż przy 0,0341 TYLKO gdy podejście jest na zwykłym wolumenie (bez kilkukrotnego skoku) i BTC nie wybija nad 65 700; im wcześniejsze dotknięcie góry, tym lepiej (trójkąt się zwęża). Przy wybiciu: odkup po 2 zamknięciach 1h nad 0,0346."},
     {"id": "1a", "stage": 1, "label": "Pośredni 1a – SMA100", "intermediate": true,
      "sell": 0.0365, "sell_range": [0.0360, 0.0372], "eta": "2026-11-20",
      "rebuy": 0.0336, "rebuy_range": [0.0330, 0.0342], "rebuy_eta": "2026-11-22", "breakout": 0.0372,
@@ -137,6 +137,17 @@
       {"name": "Retest i podwójne dno 62–63,9 tys.", "pct": 38},
       {"name": "Zejście do 58–61 tys. (w tym ok. 10% na bessę do 50 tys.)", "pct": 27}
     ]
+  },
+
+  "stair_pattern_aug_oct_2026": {
+    "_opis": "Schody Sonica VIII–X 2026: krótkie wybicie (4–5 dni, ok. +30–35% na zamknięciach), potem poziomy przedział 17–26 dni (szerokość 17–26% na zamknięciach, obrót 1–2 mln USD/d). Prawdziwe wybicie = zamknięcie dnia nad górą przedziału przy kilkukrotnym wolumenie. Pierwsze cofnięcie po szczycie wybicia: -17%, -22%, -33%, kończy się 6–12% nad górą poprzedniego przedziału.",
+    "first_pullbacks": [
+      {"peak": 0.03141, "date": "2026-08-22", "low": 0.02593, "pct": -17.4, "days": 1.2, "above_prev_range_top_pct": 6},
+      {"peak": 0.04812, "date": "2026-09-22", "low": 0.03736, "pct": -22.4, "days": 6.7, "above_prev_range_top_pct": 11},
+      {"peak": 0.07393, "date": "2026-10-13", "low": 0.04926, "pct": -33.4, "days": 5.7, "above_prev_range_top_pct": 6}
+    ],
+    "current_range": {"since": "2026-11-14", "low_zone": [0.0327, 0.0329], "top_zone": [0.0340, 0.0342], "breakout_level": 0.0346,
+                      "expected_first_pullback_after_breakout": [0.0367, 0.0388]}
   },
 
   "wave_stats_bull_markets_1D_zigzag30": {
