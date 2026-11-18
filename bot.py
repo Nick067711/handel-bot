@@ -649,12 +649,13 @@ def push_repo():
     import subprocess
     def git(*a):
         return subprocess.run(["git", *a], capture_output=True, text=True)
+    branch = os.getenv("GITHUB_REF_NAME", "main")
     git("add", "raport/")
     if git("diff", "--cached", "--quiet").returncode == 0:
+        git("pull", "-q", "--rebase", "origin", branch)    # pobierz zmiany planu (data/sonic_plan.json) na następny cykl
         return
     git("-c", "user.name=handel-bot", "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
         "commit", "-q", "-m", f"Raport bota {datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC [skip ci]")
-    branch = os.getenv("GITHUB_REF_NAME", "main")
     for _ in range(3):
         if git("pull", "-q", "--rebase", "origin", branch).returncode == 0 and \
                 git("push", "-q", "origin", f"HEAD:{branch}").returncode == 0:

@@ -13,15 +13,15 @@
 
   "start": {
     "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
-    "from": "2026-11-17T16:00:00Z",
+    "from": "2026-11-18T21:00:00Z",
     "phase": "HOLD",
     "step": "1a",
-    "fill": {"date": "2026-11-17T16:01:07Z", "price": 0.0330, "S": 99300, "venue": "Coinbase, zlecenie rynkowe"}
+    "fill": {"date": "2026-11-18", "price": null, "S": 98874, "venue": "Coinbase – odkup na dołku 18.11 (wcześniej sprzedaż ze stratą)", "note": "cena odkupu do uzupełnienia"}
   },
 
   "capital": {
     "_opis": "Do tabeli prognozy kapitału w raporcie: liczba Soniców na starcie i prowizja od każdej transakcji (Coinbase, maker 0,2% przy zleceniach z limitem).",
-    "start_S": 99300,
+    "start_S": 98874,
     "fee_pct": 0.2
   },
 
@@ -53,7 +53,7 @@
     "live_near_pct": 2.0,
     "live_poll_seconds": 60,
     "live_breakout_watch_pct": 1.0,
-    "intermediate_alerts": false,
+    "intermediate_alerts": true,
     "execution": "ostrożny: sprzedaż w połowie między dolną granicą widełek a głównym poziomem, odkup na górnej granicy widełek"
   },
 
@@ -93,10 +93,14 @@
     {"id": "start", "stage": 1, "label": "Start – akumulacja",
      "buy": 0.0330, "buy_range": [0.0300, 0.0340], "buy_core": [0.0308, 0.0336], "breakout": 0.0334,
      "eta": "2026-11-17", "note": "Kupione 17.11.2026 ok. 17:01: 99 300 S po średnio ok. 0,0330 (Coinbase, zlecenie rynkowe, po odbiciu BTC od 63 336)"},
-    {"id": "0b", "stage": 1, "label": "Pośredni 0b – góra obecnego trójkąta", "intermediate": true,
+    {"id": "0a", "stage": 1, "label": "Pośredni 0a – przebita podłoga kanału 0,0327", "intermediate": true,
+     "sell": 0.0327, "sell_range": [0.0325, 0.0329], "eta": "2026-11-19",
+     "rebuy": 0.0313, "rebuy_range": [0.0310, 0.0314], "rebuy_eta": "2026-11-20", "breakout": 0.0334,
+     "note": "Opór: dawna podłoga kanału C0 (0,0327), przebita 17–18.11. Odkup przy górze strefy W1 (0,0310–0,0314), gdzie 18.11 cena odbijała. Przy wybiciu: odkup po 2 zamknięciach 1h nad 0,0334 (dzisiejszy szczyt 0,0333)."},
+    {"id": "0b", "stage": 1, "label": "Pośredni 0b – sufit dawnego kanału", "intermediate": true,
      "sell": 0.0341, "sell_range": [0.0340, 0.0342], "eta": "2026-11-18",
      "rebuy": 0.0329, "rebuy_range": [0.0328, 0.0330], "rebuy_eta": "2026-11-19", "breakout": 0.0346,
-     "note": "Trójkąt z wyższymi dołkami (ok. 0,0327–0,0329) i górą 0,0340–0,0342. Sprzedaż przy 0,0341 TYLKO gdy podejście jest na zwykłym wolumenie (bez kilkukrotnego skoku) i BTC nie wybija nad 65 700; im wcześniejsze dotknięcie góry, tym lepiej (trójkąt się zwęża). Przy wybiciu: odkup po 2 zamknięciach 1h nad 0,0346."},
+     "note": "Opór: góra dawnego kanału 0,0340–0,0346 (14–17.11). Odkup przy dawnej podłodze 0,0328–0,0330. Sprzedaż TYLKO gdy podejście jest na zwykłym wolumenie (bez kilkukrotnego skoku) – przy skoku wolumenu to może być wybicie. Przy wybiciu: odkup po 2 zamknięciach 1h nad 0,0346."},
     {"id": "1a", "stage": 1, "label": "Schodek 1 – SMA100 (pierwszy opór)",
      "sell": 0.0362, "sell_range": [0.0362, 0.0368], "sell_limit": 0.0362, "eta": "2026-11-20",
      "rebuy": 0.0342, "rebuy_range": [0.0330, 0.0342], "rebuy_eta": "2026-11-22", "breakout": 0.0370,
