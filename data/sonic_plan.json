@@ -15,7 +15,7 @@
     "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
     "from": "2026-11-17T16:00:00Z",
     "phase": "HOLD",
-    "step": "1",
+    "step": "1a",
     "fill": {"date": "2026-11-17T16:01:07Z", "price": 0.0330, "S": 99300, "venue": "Coinbase, zlecenie rynkowe"}
   },
 
@@ -23,6 +23,15 @@
     "_opis": "Do tabeli prognozy kapitału w raporcie: liczba Soniców na starcie i prowizja od każdej transakcji (Coinbase, maker 0,2% przy zleceniach z limitem).",
     "start_S": 99300,
     "fee_pct": 0.2
+  },
+
+  "channel": {
+    "_opis": "Bieżący kanał (schodek). Alerty: PRE_BREAKOUT (obserwuj: zamknięcie 1h najwyżej pre_dist_pct pod sufitem, RSI 1h >= pre_rsi, max wolumen 6h >= pre_vol_mult x średnia 48h), CHANNEL_BREAKOUT (zamknięcie 1h > sufit + break_pct%, max wolumen 24h >= vol_mult x średnia), UPDATE_2D (48 h po wybiciu, jeśli sprzedaż jeszcze nie weszła). Parametry z wybić VIII–X 2026.",
+    "id": "C0", "floor": 0.0327, "ceiling": 0.0346, "since": "2026-11-14",
+    "break_pct": 1.0, "vol_mult": 3.0, "pre_dist_pct": 5.0, "pre_rsi": 63, "pre_vol_mult": 2.5,
+    "after": {"sell": 0.0362, "rebuy": 0.0342, "max": [0.0392, 0.0400],
+              "next_channel": [0.0338, 0.0365], "swing_pct": 8,
+              "note": "Pierwszy opór po wybiciu: SMA100 0,0367 i ściana 0,0367–0,0370. Gdy pęknie bez cofnięcia: kolejny cel 0,0392."}
   },
 
   "signal_rules": {
@@ -62,13 +71,15 @@
      "sell": 0.0341, "sell_range": [0.0340, 0.0342], "eta": "2026-11-18",
      "rebuy": 0.0329, "rebuy_range": [0.0328, 0.0330], "rebuy_eta": "2026-11-19", "breakout": 0.0346,
      "note": "Trójkąt z wyższymi dołkami (ok. 0,0327–0,0329) i górą 0,0340–0,0342. Sprzedaż przy 0,0341 TYLKO gdy podejście jest na zwykłym wolumenie (bez kilkukrotnego skoku) i BTC nie wybija nad 65 700; im wcześniejsze dotknięcie góry, tym lepiej (trójkąt się zwęża). Przy wybiciu: odkup po 2 zamknięciach 1h nad 0,0346."},
-    {"id": "1a", "stage": 1, "label": "Pośredni 1a – SMA100", "intermediate": true,
-     "sell": 0.0365, "sell_range": [0.0360, 0.0372], "eta": "2026-11-20",
-     "rebuy": 0.0336, "rebuy_range": [0.0330, 0.0342], "rebuy_eta": "2026-11-22", "breakout": 0.0372,
-     "note": "Opór SMA100 i dołki z lut–lis 2026 (0,0363–0,0370). Decyzja na gorąco: sprzedaj tylko, jeśli cena wyraźnie zawraca."},
-    {"id": "1", "stage": 1, "label": "Krok 1",
-     "sell": 0.0400, "sell_range": [0.0386, 0.0410], "eta": "2026-11-25",
-     "rebuy": 0.0355, "rebuy_range": [0.0345, 0.0362], "rebuy_eta": "2026-11-30"},
+    {"id": "1a", "stage": 1, "label": "Schodek 1 – SMA100 (pierwszy opór)",
+     "sell": 0.0362, "sell_range": [0.0362, 0.0368], "sell_limit": 0.0362, "eta": "2026-11-20",
+     "rebuy": 0.0342, "rebuy_range": [0.0330, 0.0342], "rebuy_eta": "2026-11-22", "breakout": 0.0370,
+     "note": "Pierwszy mocny opór: SMA100 0,0367 i ściana 0,0367–0,0370 (7 razy wsparcie IX–XI 2026). We wrześniu pierwsze dotknięcie 0,0367 dało cofnięcie −8% do 0,0338.",
+     "rebuy_note": "Bezpieczny odkup 0,0342 (−5,5% pod sprzedażą); gdy ściana pęknie bez cofnięcia – kupno na wybiciu po 2 zamknięciach 1h nad 0,0374."},
+    {"id": "1", "stage": 1, "label": "Schodek 2 – 0,0392",
+     "sell": 0.0392, "sell_range": [0.0392, 0.0410], "sell_limit": 0.0392, "eta": "2026-11-25",
+     "rebuy": 0.0362, "rebuy_range": [0.0350, 0.0362], "rebuy_eta": "2026-11-30",
+     "rebuy_note": "Odkup na dawnym oporze 0,0362–0,0370 (teraz wsparcie), −7,7% pod sprzedażą."},
     {"id": "2", "stage": 1, "label": "Krok 2",
      "sell": 0.0445, "sell_range": [0.0430, 0.0465], "eta": "2026-12-10",
      "rebuy": 0.0398, "rebuy_range": [0.0388, 0.0405], "rebuy_eta": "2026-12-16"},

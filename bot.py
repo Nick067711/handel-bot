@@ -145,7 +145,7 @@ def publish(state, html_doc=None, archive_name=None):
 # ----------------------------------------------------------------- dane
 async def fetch_sonic_1h(session, errors, from_ts):
     """Świece 1h Sonica od początku planu (Coinbase, zapas: Kraken – ostatnie 30 dni)."""
-    c1h = await M.safe(M.coinbase_candles(session, "S-USD", 3600, start_ts=from_ts - 6 * 3600), "Coinbase S-USD świece 1h", errors)
+    c1h = await M.safe(M.coinbase_candles(session, "S-USD", 3600, start_ts=from_ts - 80 * 3600), "Coinbase S-USD świece 1h", errors)
     src = "Coinbase"
     if not c1h:
         c1h = await M.safe(M.kraken_ohlc(session, "SUSD", 60), "Kraken S/USD świece 1h", errors)

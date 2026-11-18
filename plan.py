@@ -107,7 +107,7 @@ def buy_zone(plan, sid):
 def sell_zone(plan, sid):
     s = step_by_id(plan, sid)
     lo, hi = s["sell_range"]
-    return dict(step=sid, lo=lo, hi=hi, main=s["sell"], limit=sell_limit(lo, s["sell"]), label=s["label"], final=s.get("final", False),
+    return dict(step=sid, lo=lo, hi=hi, main=s["sell"], limit=s.get("sell_limit") or sell_limit(lo, s["sell"]), label=s["label"], final=s.get("final", False),
                 condition=s.get("condition"))
 
 
@@ -156,6 +156,66 @@ def fmt(x):
 
 
 # ----------------------------------------------------------------- odtwarzanie planu na 1h
+def rsi_series(closes, n=14):
+    out, g, l = [None] * len(closes), 0.0, 0.0
+    for i in range(1, len(closes)):
+        d = closes[i] - closes[i - 1]
+        if i <= n:
+            g += max(d, 0); l += max(-d, 0)
+            if i == n:
+                g /= n; l /= n
+                out[i] = 100 - 100 / (1 + g / l) if l else 100
+        else:
+            g = (g * (n - 1) + max(d, 0)) / n
+            l = (l * (n - 1) + max(-d, 0)) / n
+            out[i] = 100 - 100 / (1 + g / l) if l else 100
+    return out
+
+
+def channel_events(plan, candles_1h, t_from, sold_after=None):
+    """Alerty kanału (schodka): PRE_BREAKOUT, CHANNEL_BREAKOUT, UPDATE_2D. Wolumen = obrót w USD (v*c)."""
+    ch = plan.get("channel")
+    if not ch or not candles_1h:
+        return []
+    ev = []
+    closes = [c["c"] for c in candles_1h]
+    rs = rsi_series(closes)
+    qv = [c.get("v", 0) * c["c"] for c in candles_1h]
+    top = ch["ceiling"]
+    brk = top * (1 + ch.get("break_pct", 1.0) / 100)
+    last_pre, broke = None, None
+
+    def avg48(i):
+        w = qv[max(0, i - 48):i]
+        return sum(w) / len(w) if w else 0
+
+    for i, c in enumerate(candles_1h):
+        if c["t"] < t_from:
+            continue
+        a = avg48(i)
+        if not broke:
+            mx6 = max(qv[max(0, i - 5):i + 1]) / a if a else 0
+            mx24 = max(qv[max(0, i - 23):i + 1]) / a if a else 0
+            if c["c"] > brk and mx24 >= ch.get("vol_mult", 3.0):
+                broke = c
+                ev.append(dict(kind="CHANNEL_BREAKOUT", t=c["t"] + HOUR, step=ch["id"], price=c["c"], high=c["h"], low=c["l"],
+                               channel=ch, vol_x=round(mx24, 1)))
+                continue
+            near = top * (1 - ch.get("pre_dist_pct", 5.0) / 100) <= c["c"] <= brk
+            if near and rs[i] and rs[i] >= ch.get("pre_rsi", 63) and mx6 >= ch.get("pre_vol_mult", 2.5) and \
+                    (last_pre is None or c["t"] - last_pre >= 24 * HOUR):
+                last_pre = c["t"]
+                ev.append(dict(kind="PRE_BREAKOUT", t=c["t"] + HOUR, step=ch["id"], price=c["c"], high=c["h"], low=c["l"],
+                               channel=ch, rsi=round(rs[i]), vol_x=round(mx6, 1)))
+        else:
+            if c["t"] >= broke["t"] + 48 * HOUR and not any(e["kind"] == "UPDATE_2D" for e in ev):
+                if sold_after is None or sold_after > c["t"]:
+                    hi = max(x["h"] for x in candles_1h if broke["t"] <= x["t"] <= c["t"])
+                    ev.append(dict(kind="UPDATE_2D", t=c["t"] + HOUR, step=ch["id"], price=c["c"], high=c["h"], low=c["l"],
+                                   channel=ch, peak=hi))
+    return ev
+
+
 def replay(plan, candles_1h, daily=None, now_ts=None):
     """
     candles_1h: zamknięte świece 1h rosnąco [{t,o,h,l,c}], t = otwarcie świecy (UTC).
@@ -259,6 +319,8 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
                     sup = next_support(plan, last_fill["lo"])
                     ev("STEP_FAIL", c, step=last_fill["step"], zone=last_fill, support=sup, target=target)
 
+    first_sell = next((e["t"] for e in events if e["kind"] == "SELL"), None)
+    events = sorted(events + channel_events(plan, candles_1h, t_from, first_sell), key=lambda e: e["t"])
     last = candles_1h[-1] if candles_1h else None
     state = dict(phase="INVALID" if invalid else phase, zone=zone if phase == "BUY" else None,
                  target=target, last_fill=last_fill, price=last["c"] if last else None,
@@ -465,7 +527,7 @@ def capital_path(plan, use_mid):
         if s.get("intermediate") and not use_mid:
             continue
         lo, hi = s["sell_range"]
-        sp = sell_limit(lo, s["sell"])
+        sp = s.get("sell_limit") or sell_limit(lo, s["sell"])
         row = dict(step=s["id"], label=s["label"], mid=bool(s.get("intermediate")), S_in=S, sell=sp, sell_lo=lo, sell_hi=hi,
                    usd=S * sp * (1 - fee), usd_lo=S * lo * (1 - fee), usd_hi=S * hi * (1 - fee), rebuy=None, S=None)
         if s["id"] == "2d" or s.get("final") or not s.get("rebuy_range"):

@@ -20,13 +20,13 @@ NTFY_URL = os.getenv("NTFY_URL", "https://ntfy.sh").rstrip("/")
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
 NTFY_TOKEN = os.getenv("NTFY_TOKEN", "")
 
-PRIORITY = {"INVALID": 5, "SELL": 5, "BUY": 5, "BUY_BREAKOUT": 5, "STEP_FAIL": 4, "PREP_SELL": 4, "PREP_BUY": 4,
+PRIORITY = {"CHANNEL_BREAKOUT": 5, "PRE_BREAKOUT": 3, "UPDATE_2D": 4, "INVALID": 5, "SELL": 5, "BUY": 5, "BUY_BREAKOUT": 5, "STEP_FAIL": 4, "PREP_SELL": 4, "PREP_BUY": 4,
             "PREP_MID": 3, "MID_SELL": 4, "MID_REBUY": 4, "MID_BREAKOUT": 4, "CONFIRM": 3}
-TAGS = {"INVALID": ["no_entry"], "SELL": ["red_circle"], "BUY": ["green_circle"], "BUY_BREAKOUT": ["rocket"],
+TAGS = {"CHANNEL_BREAKOUT": ["rocket"], "PRE_BREAKOUT": ["eyes"], "UPDATE_2D": ["memo"], "INVALID": ["no_entry"], "SELL": ["red_circle"], "BUY": ["green_circle"], "BUY_BREAKOUT": ["rocket"],
         "STEP_FAIL": ["warning"], "PREP_SELL": ["hourglass"], "PREP_BUY": ["hourglass"], "PREP_MID": ["eyes"],
         "MID_SELL": ["large_orange_diamond"], "MID_REBUY": ["large_blue_diamond"], "MID_BREAKOUT": ["large_blue_diamond"],
         "CONFIRM": ["white_check_mark"]}
-STRENGTH = {"PREP_SELL": 1, "PREP_BUY": 1, "PREP_MID": 1, "SELL": 2, "BUY": 2, "BUY_BREAKOUT": 2, "STEP_FAIL": 2, "INVALID": 3,
+STRENGTH = {"CHANNEL_BREAKOUT": 2, "PRE_BREAKOUT": 1, "UPDATE_2D": 2, "PREP_SELL": 1, "PREP_BUY": 1, "PREP_MID": 1, "SELL": 2, "BUY": 2, "BUY_BREAKOUT": 2, "STEP_FAIL": 2, "INVALID": 3,
             "MID_SELL": 2, "MID_REBUY": 2, "MID_BREAKOUT": 2}
 
 
@@ -38,6 +38,10 @@ def pl_time(ts):
                              if datetime(y, m, day).weekday() == 6)
     summer = last_sun(3).replace(hour=1) <= d < last_sun(10).replace(hour=1)
     return (d + timedelta(hours=2 if summer else 1)).strftime("%d.%m %H:%M")
+
+
+def r4(x):
+    return round(x, 4) if x < 0.1 else round(x, 3)
 
 
 def fp(x, sign=False):
@@ -162,6 +166,36 @@ def message(e, plan, btc=None):
         if t:
             lines.append(f"Główny cel: {t['label']} – limit {fmt(t['limit'])} (widełki {fmt(t['lo'])}–{fmt(t['hi'])}).")
         lines.append("Jeśli nie sprzedawałeś – nic nie rób.")
+    elif k in ("CHANNEL_BREAKOUT", "PRE_BREAKOUT", "UPDATE_2D"):
+        ch = e["channel"]; af = ch.get("after") or {}
+        sell, reb = af.get("sell"), af.get("rebuy")
+        mx = af.get("max") or []
+        nc = af.get("next_channel") or []
+        if k == "PRE_BREAKOUT":
+            title = f"Obserwuj wykres – Sonic pod sufitem kanału {fmt(ch['ceiling'])}"
+            lines.append(f"Świeca 1h zamknięta {when}: {fmt(e['price'])}, {fp(abs(pct(ch['ceiling'], e['price'])))} pod sufitem, RSI 1h {e['rsi']}, "
+                         f"wolumen do {str(e['vol_x']).replace('.', ',')}× średniej. Tak wyglądały godziny przed wybiciami z VIII–X 2026 (alert bywa fałszywy).")
+            lines.append(f"Wybicie = zamknięcie 1h powyżej {fmt(ch['ceiling'] * (1 + ch.get('break_pct', 1) / 100))} przy dużym wolumenie.")
+        elif k == "CHANNEL_BREAKOUT":
+            title = f"WYBICIE z kanału {fmt(ch['floor'])}–{fmt(ch['ceiling'])}"
+            lines.append(f"Świeca 1h zamknięta {when}: {fmt(e['price'])} ({fp(pct(e['price'], ch['ceiling']), True)} nad sufitem), "
+                         f"wolumen do {str(e['vol_x']).replace('.', ',')}× średniej.")
+        else:
+            title = "Aktualizacja: 2 dni po wybiciu, sprzedaż jeszcze nie weszła"
+            pk = e["peak"]
+            lines.append(f"Najwyżej od wybicia: {fmt(pk)} ({fp(pct(pk, sell), True)} wobec celu {fmt(sell)}), teraz {fmt(e['price'])}.")
+            if pk < sell:
+                lines.append(f"Jeśli cena wyraźnie hamuje pod celem, rozważ obniżenie limitu do ok. {fmt(r4(pk * 0.99))} (1% pod szczytem). Inaczej zostaw {fmt(sell)}.")
+        if sell:
+            lines.append(f"Bezpieczna sprzedaż: {fmt(sell)} ({fp(pct(sell, e['price']), True)} od ceny). {af.get('note', '')}".strip())
+        if reb and sell:
+            lines.append(f"Bezpieczny odkup: {fmt(reb)} ({fp(pct(reb, sell), True)} pod sprzedażą).")
+        if mx:
+            lines.append(f"Możliwe maksimum, gdy opór pęknie bez cofnięcia: {' / '.join(fmt(x) for x in mx)}.")
+        if nc:
+            lines.append(f"Kanał po pierwszym szczycie: podłoga {fmt(nc[0])}, sufit {fmt(nc[1])}, wahanie ok. {af.get('swing_pct')}% "
+                         f"(we wrześniu cofnięcia rosły 6% → 8% → 12% → 18%).")
+        amt = amounts_text(plan, "sell", "1a") if sell else ""
     elif k == "INVALID":
         title = "PLAN UNIEWAŻNIONY – Sonic"
         nx = plan["invalidation"]["next_supports"]
@@ -169,7 +203,8 @@ def message(e, plan, btc=None):
         lines.append(f"Kolejne wsparcia: {', '.join(fmt(x) for x in nx)}. Nowy plan po analizie.")
     else:
         title, lines = k, [str(e)]
-    amt = ""
+    if k not in ("CHANNEL_BREAKOUT", "PRE_BREAKOUT", "UPDATE_2D"):
+        amt = ""
     if k in ("SELL", "PREP_SELL"):
         amt = amounts_text(plan, "sell", t["step"])
     elif k in ("BUY", "PREP_BUY"):

@@ -24,6 +24,9 @@ Krok pośredni **0b (góra trójkąta)**: sprzedaż 0,0340–0,0342 (limit 0,034
 
 **Wzorzec schodów (VIII–X 2026, data/sonic_plan.json → stair_pattern_aug_oct_2026):** wybicie 4–5 dni, potem poziomy przedział 17–26 dni; prawdziwe wybicie = zamknięcie dnia nad górą przedziału przy kilkukrotnym wolumenie. Pierwsze cofnięcie po szczycie wybicia jest największe (−17 do −33%) i kończy się 6–12% nad górą poprzedniego przedziału – to najważniejszy ruch do złapania. W raporcie podawaj: w jakiej fazie jest Sonic (przedział/wybicie), ile dni trwa obecny przedział, a po wybiciu – szacowaną strefę pierwszego odkupu (dla obecnej góry 0,0346: ok. 0,0367–0,0388) i porównaj ją z odkupem kroku 1 w planie.
 
+## 3b. Model schodków (od 18.11.2026 – reguły bota)
+Bot działa teraz schodkami: jedna transakcja na schodek. Bieżący kanał C0: podłoga 0,0327, sufit 0,0346 (plan → "channel"). Alerty bota: „Obserwuj” (przed wybiciem), „WYBICIE” (zamknięcie 1h > 0,0350 przy wolumenie ≥3×), sprzedaż na schodku 1 = 0,0362 (SMA100/ściana 0,0367–0,0370), odkup 0,0342, kupno na wybiciu po 2 zamknięciach 1h > 0,0374, potem schodek 2 = 0,0392 (odkup 0,0350–0,0362). W raporcie oceniaj, czy te poziomy są aktualne (np. czy ściana 0,0367–0,0370 nadal stoi, czy SMA100 się przesunęła) i czy warto je skorygować – wtedy napisz konkretną propozycję.
+
 ## 3a. Zasada: odbicie w przebity poziom
 Jeśli BTC (albo Sonic) przebił wsparcie i teraz odbija z powrotem do tego poziomu (przebita podstawa = opór), NIE sugeruj zakupu w trakcie takiego odbicia. Napisz wprost: „to odbicie w opór X – nie wchodź przed zamknięciem 1h nad X albo poczekaj na powrót do dołka Y”. Takie odbicia są zwykle sprzedawane (np. 17.11.2026: BTC przebił 64 000, odbił z 63 336 do 64 483, dokładnie w przebitą podstawę 64 250–64 500, i znów spadł). Tę samą zasadę stosuj w każdej odpowiedzi na żywo.
 
