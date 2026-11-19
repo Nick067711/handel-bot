@@ -318,6 +318,12 @@ def replay(plan, candles_1h, daily=None, now_ts=None):
             if bo and armed:
                 above = above + 1 if c["c"] > bo * (1 + R["breakout_buffer_pct"] / 100) else 0
                 if above >= R["breakout_closes_1h"]:
+                    # kupno na wybiciu: pomiń kroki, których widełki sprzedaży są już pod ceną (fala mocniejsza – nie sprzedawaj od razu)
+                    while target and not target.get("final") and target["lo"] <= c["c"] * 1.02:
+                        nx = next_trade_step(plan, target["step"])
+                        if not nx:
+                            break
+                        target = sell_zone(plan, nx["id"])
                     ev("BUY_BREAKOUT", c, step=zone["step"], zone=zone, target=target, level=bo)
                     last_fill, phase, above, below, armed = dict(zone, lo=bo * 0.97, hi=bo), "HOLD", 0, 0, False
                     mids = mids_for(plan, target)
