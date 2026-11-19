@@ -485,7 +485,7 @@ def _after_mid_id(plan, state, mid_id):
     ids = [m["id"] for m in (state or {}).get("mids") or []]
     if mid_id in ids:
         for m in (state.get("mids") or [])[ids.index(mid_id) + 1:]:
-            if m["status"] == "pending":
+            if m["status"] != "done":
                 return m["id"]
     t = (state or {}).get("target")
     return t["step"] if t else None

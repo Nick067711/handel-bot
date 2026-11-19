@@ -162,9 +162,15 @@ def deep_events(plan, candles_1h, t_from):
     need = ds.get("lost_closes_1h", 2)
     st = {z["id"]: dict(touched=False, lost=False, below=0) for z in zones}
     ev = []
+    first = True
     for c in candles_1h:
         if c["t"] < t_from:
             continue
+        if first:      # cena już w strefie w chwili startu planu – bez alertu „wejście w strefę”
+            for z in zones:
+                if c["l"] <= z["hi"] and c["h"] >= z["lo"]:
+                    st[z["id"]]["touched"] = True
+            first = False
         for i, z in enumerate(zones):
             s = st[z["id"]]
             below = [x for x in zones[i + 1:]]
