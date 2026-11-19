@@ -110,3 +110,11 @@ Harmonogram GitHuba (`schedule`) jest zawodny – 18.11 uruchomił bota tylko 3 
 w trybie ciągłym: jedno uruchomienie trwa ok. 5,5 h (`RUN_MINUTES`), co godzinę po zamknięciu świecy 1h robi pełny cykl
 (sygnały planu, strefy wsparcia, StochRSI), między cyklami czuwa na żywo co minutę, po każdym cyklu wypycha `raport/`,
 a na końcu sam uruchamia kolejną zmianę (`gh workflow run`). Harmonogram co godzinę zostaje tylko jako zapas.
+
+## Monitoring BTC i NEAR (od 19.11.2026, `monitor.py`, plan → `monitor`)
+
+Co 15 minut (w czuwaniu na żywo) i w każdym cyklu godzinowym bot sprawdza i wysyła na ntfy (każdy alert raz):
+- **BTC 15m – spadek momentum na szczycie:** dwa szczyty (drugi równy lub wyższy), RSI(14) niżej o ≥5 pkt, zamknięcie 15m pod dołkiem między szczytami. Historia (bessa, 165 przypadków): nowy szczyt w 12 h 45%, spadek ≥1% 43%.
+- **BTC – dzień po świeżym dołku:** czy padło +4,7% od dołka (dalej do +9,6% w 56%), czy nie (najpierw nowy dołek w 86%).
+- **BTC – dno pękło:** zamknięcie 1h >1% pod dołkiem 20 dni.
+- **NEAR – oderwany wzrost zawraca:** wzrost ≥10% w 72 h przy BTC <+4%, cena ≥2% pod szczytem. Od 12.10.2026 9 z 9 takich wzrostów wróciło pod start.

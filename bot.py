@@ -24,6 +24,7 @@ import market_data as M
 import analysis as A
 import ai as AI
 import plan as P
+import monitor as MON
 import notify as N
 import report_html as R
 import sonic_history as H
@@ -594,6 +595,8 @@ async def main():
             append_signals_log(log)
         sys.exit(1)
 
+    await run_monitor(plan, state, log)
+
     # --- czuwanie na żywo do końca godziny (sygnały w trakcie budowania świecy 1h)
     if LIVE_UNTIL_MINUTE and fresh_1h and pst["phase"] in ("BUY", "HOLD"):
         hour0 = now_ts - now_ts % 3600
@@ -605,6 +608,27 @@ async def main():
     print("Koniec cyklu.")
 
 
+async def run_monitor(plan, state, log):
+    """Monitoring BTC (prawdziwe/fałszywe odbicie) i NEAR – alerty ntfy, każdy tylko raz."""
+    cfg = plan.get("monitor") or {}
+    if not cfg.get("enabled"):
+        return
+    sent = set(state.get("mon_sent") or [])
+    try:
+        alerts = await asyncio.to_thread(MON.check, cfg, sent)
+    except Exception as ex:
+        print(f"[monitor] błąd: {type(ex).__name__}: {ex}")
+        return
+    for key, title, body, pr, tg in alerts:
+        if N.send(title, body, pr, tg, REPORT_URL, DRY_RUN):
+            sent.add(key)
+            log.append(dict(wyslano=datetime.now(timezone.utc).isoformat(), czas_swiecy_pl="monitor", typ=key.split(":")[0],
+                            krok=None, cena=None, tytul=title, tresc=body))
+    if alerts:
+        state["mon_sent"] = sorted(sent)[-300:]
+        publish(state)
+
+
 async def live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx):
     """Co ok. minutę sprawdza cenę Sonica (środek bid/ask z Coinbase) względem poziomów bieżącego kroku planu."""
     poll = plan["signal_rules"].get("live_poll_seconds", 60)
@@ -612,8 +636,12 @@ async def live_loop(plan, pst, state, sent_cls, deadline, log, btc_ctx):
     print(f"[live] czuwam do {datetime.fromtimestamp(deadline, timezone.utc):%H:%M} UTC, poziomy: "
           + ", ".join(f"{w['kind']} {w['step']} @{P.fmt(w['level'])}" for w in watches))
     errs, last_btc, n = {}, 0.0, 0
+    last_mon = 0.0
     async with aiohttp.ClientSession() as session:
         while time.time() < deadline:
+            if time.time() - last_mon >= 900 and int(time.time()) % 900 >= 60:      # co 15 min, minutę po zamknięciu świecy 15m
+                last_mon = time.time() - (int(time.time()) % 900)
+                await run_monitor(plan, state, log)
             t = await M.safe(M.coinbase_ticker(session, "S-USD"), "Coinbase S-USD ticker (live)", errs)
             if t:
                 price = (t["bid"] + t["ask"]) / 2 if t.get("bid") and t.get("ask") else t["price"]

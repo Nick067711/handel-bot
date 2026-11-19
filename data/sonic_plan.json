@@ -33,6 +33,9 @@
       "note": "Kanał docelowy jak 22.09–08.10.2026: dno 0,0372, szczyty 0,0418–0,0463."}
   },
 
+  "monitor": {"enabled": true, "btc_div_15m": true, "btc_structure": true, "near_fade": true, "near_symbol": "NEARUSDT",
+    "_opis": "Alerty: BTC 15m spadek momentum na szczycie + zamknięcie pod szyją; BTC zasada 1. dnia po 20-dniowym dołku; BTC pęknięcie dna; NEAR oderwany wzrost zawraca. Statystyki w monitor.py."},
+
   "stochrsi": {
     "_opis": "Alerty StochRSI 1h Sonica na ntfy (prośba użytkownika 18.11.2026). TOP: linia STOCHRSI przechodzi w górę przez top_level (obserwuj szczyt; info o dywergencji z poprzednim szczytem). BOTTOM: linia schodzi do bottom_level (możliwy dołek). Dane: Binance S/USDC 1h (jak w aplikacji użytkownika), zapas S/USDT, potem Coinbase.",
     "enabled": true, "symbol": "SUSDC", "fallback_symbol": "SUSDT", "interval": "1h",
