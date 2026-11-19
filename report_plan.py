@@ -269,7 +269,7 @@ def projection_chart_svg(pc, sonic, mobile=False):
         lines = [(name + fmt(p["price"]), "lbl-top" if top else "lbl-bot", fs), (d_short(p["t"]) if not far else d_full(p["t"])[3:].replace(".", "/"), "lbl-m", sm)]
         if mobile and not top and not far:
             lines = lines[:1]
-        if mobile and p["step"] in ("2a", "2b", "2c") or (mobile and not top and not far and p["step"] != "5"):
+        if mobile and p["step"] in ("2a", "2c") or (mobile and not top and not far and p["step"] != "5"):
             continue          # na telefonie te punkty opisuje tabela kroków
         y0 = y - sm - 9 if top else y + fs + 7
         T.append((x, y0, lines, "middle", -1 if top else 1, (x, y)))

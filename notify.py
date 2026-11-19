@@ -194,7 +194,7 @@ def _message_long(e, plan, btc=None):
         if nc:
             lines.append(f"Kanał po pierwszym szczycie: podłoga {fmt(nc[0])}, sufit {fmt(nc[1])}, wahanie ok. {af.get('swing_pct')}% "
                          f"(we wrześniu cofnięcia rosły 6% → 8% → 12% → 18%).")
-        amt = amounts_text(plan, "sell", "1a") if sell else ""
+        amt = amounts_text(plan, "sell", next((x["id"] for x in plan["steps"] if x["id"] != "start" and not x.get("intermediate")), "1")) if sell else ""
     elif k == "INVALID":
         title = "PLAN UNIEWAŻNIONY – Sonic"
         lines.append(f"Zamknięcie dnia {fmt(e['close'])} poniżej poziomu unieważnienia. Scenariusz hossy wstrzymany.")
