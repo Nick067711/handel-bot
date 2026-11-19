@@ -16,5 +16,14 @@
   "cena": null,
   "tytul": "NEAR: oderwany wzrost +12% zawraca (3,404)",
   "tresc": "Start wzrostu 3,097 (17.11 16:00) → szczyt 3,477 (19.11 10:00); BTC w tym czasie -0,4%.\nOd 12.10.2026: 9 z 9 takich wzrostów wróciło pod start (typowo po ok. 25 h; spadek od szczytu 21–33%).\nCele: start wzrostu 3,097 (-9%), −25% od szczytu 2,608.\nBTC 63 878 | ostatni dołek 62 063 (18.11) | +4,7%: 64 980 | +9,6%: 68 021"
+ },
+ {
+  "wyslano": "2026-11-19T16:01:00.000429+00:00",
+  "czas_swiecy_pl": "19.11 17:00",
+  "typ": "STOCH_BOTTOM",
+  "krok": null,
+  "cena": 0.03045,
+  "tytul": "StochRSI 1h ≤ 5 – możliwy dołek Sonica",
+  "tresc": "Świeca 1h 19.11 16:00–17:00: StochRSI 0 (MA 15), cena 0,03045, dołek świecy 0,03027.\nNastępny stopień:\nSPRZEDAŻ 0,0408  (widełki 0,0408–0,0434)\nODKUP 0,0380  (widełki 0,0372–0,0380)\nTunel stopień 1a: 0,0380 – 0,0408 (+7,4%)\nBez korekty: odkup na wybiciu po 2 zamkn. 1h > 0,0468\nKwota wg planu: 98 874 S → 4 026 USD → 105 735 S"
  }
 ]
