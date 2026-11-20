@@ -34,5 +34,14 @@
   "cena": 0.03066,
   "tytul": "StochRSI 1h ≥ 58 – obserwuj szczyt Sonica",
   "tresc": "Świeca 1h 19.11 20:00–21:00: StochRSI 66 (MA 37), cena 0,03066.\nPoprzedni szczyt StochRSI: 94 przy cenie 0,0317 (19.11 10:00).\nCena niżej niż przy poprzednim szczycie – niższy szczyt.\nNastępny stopień:\nSPRZEDAŻ 0,0408  (widełki 0,0408–0,0434)\nODKUP 0,0380  (widełki 0,0372–0,0380)\nTunel stopień 1a: 0,0380 – 0,0408 (+7,4%)\nBez korekty: odkup na wybiciu po 2 zamkn. 1h > 0,0468\nKwota wg planu: 98 874 S → 4 026 USD → 105 735 S"
+ },
+ {
+  "wyslano": "2026-11-20T02:01:00.000401+00:00",
+  "czas_swiecy_pl": "20.11 03:00",
+  "typ": "DEEP_LOST",
+  "krok": "W1",
+  "cena": 0.02904,
+  "tytul": "Wsparcie W1 0,0300–0,0314 przebite – Sonic 0,02904",
+  "tresc": "Sonic 0,02904 (świeca 1h 20.11 03:00)\nGórna granica zakresu sie–wrz 2026 (BTC ok. 61–62 tys.).\nNiżej: W2 0,0270–0,0280 (BTC ok. 58–60 tys.)\nNastępny stopień:\nSPRZEDAŻ 0,0408  (widełki 0,0408–0,0434)\nODKUP 0,0380  (widełki 0,0372–0,0380)\nTunel stopień 1a: 0,0380 – 0,0408 (+7,4%)\nBez korekty: odkup na wybiciu po 2 zamkn. 1h > 0,0468\nKwota wg planu: 98 874 S → 4 026 USD → 105 735 S\nBTC 61 424 | wsp. 59 500 | opór 62 500"
  }
 ]
