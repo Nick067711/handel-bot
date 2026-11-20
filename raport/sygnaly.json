@@ -61,5 +61,14 @@
   "cena": 0.02823,
   "tytul": "Sonic 0,02823 w strefie wsparcia W2 0,0270–0,0280",
   "tresc": "Sonic 0,02823 (świeca 1h 20.11 15:00)\nDołki cze/sie 2026 (BTC ok. 58–60 tys.).\nNiżej: W3 0,0248–0,0261 (BTC ok. 53–57 tys.); przebicie W2 = 2 zamkn. 1h < 0,0270\nNastępny stopień:\nSPRZEDAŻ 0,0408  (widełki 0,0408–0,0434)\nODKUP 0,0380  (widełki 0,0372–0,0380)\nTunel stopień 1a: 0,0380 – 0,0408 (+7,4%)\nBez korekty: odkup na wybiciu po 2 zamkn. 1h > 0,0468\nKwota wg planu: 98 874 S → 4 026 USD → 105 735 S\nBTC 61 842 | wsp. 59 500 | opór 62 500"
+ },
+ {
+  "wyslano": "2026-11-20T16:01:12.972462+00:00",
+  "czas_swiecy_pl": "monitor",
+  "typ": "BTC_BREAK",
+  "krok": null,
+  "cena": null,
+  "tytul": "BTC: dno 61 230 pękło – zamknięcie 1h 59 475",
+  "tresc": "Świeca 20.11 16:00. Historia (18 przypadków od 2025): NEAR w 48 h spadał dalej typowo o 5,5%, w 5 z 18 o ≥10%.\nBTC 59 475 | ostatni dołek 61 428 (19.11) | +4,7%: 64 315 | +9,6%: 67 325"
  }
 ]
