@@ -1,16 +1,16 @@
 {
- "wygenerowano": "19.11.2026, 05:01 UTC",
+ "wygenerowano": "20.11.2026, 05:01 UTC",
  "uwaga": "Kopia danych z raportu dziennego bota (piwecki.pl/analiza). Plan etapowy: data/sonic_plan.json.",
  "plan": {
   "faza": "HOLD",
-  "co_robic_teraz": "Trzymamy Sonica. Zlecenie sprzedaży z limitem: Schodek 1 – SMA100 (pierwszy opór) 0,0362 (widełki 0,0362–0,0368, główny poziom 0,0362; wariant ostrożny).",
+  "co_robic_teraz": "Trzymamy Sonica. Zlecenie sprzedaży z limitem: Kanał 1, podejście 1: 0,0372–0,0444 0,0408 (widełki 0,0408–0,0434, główny poziom 0,0408; wariant ostrożny).",
   "cel_sprzedazy": {
    "step": "1a",
-   "lo": 0.0362,
-   "hi": 0.0368,
-   "main": 0.0362,
-   "limit": 0.0362,
-   "label": "Schodek 1 – SMA100 (pierwszy opór)",
+   "lo": 0.0408,
+   "hi": 0.0434,
+   "main": 0.0408,
+   "limit": 0.0408,
+   "label": "Kanał 1, podejście 1: 0,0372–0,0444",
    "final": false,
    "condition": null
   },
@@ -18,14 +18,6 @@
   "ostatni_zakup": null,
   "polozenie": {
    "below": [
-    {
-     "price": 0.0307,
-     "lo": 0.03,
-     "hi": 0.0314,
-     "kind": "support",
-     "step": "W1",
-     "name": "Wsparcie W1 0,0300–0,0314 (Górna granica zakresu sie–wrz 2026)"
-    },
     {
      "price": 0.0275,
      "lo": 0.027,
@@ -41,51 +33,59 @@
      "kind": "support",
      "step": "W3",
      "name": "Wsparcie W3 0,0248–0,0261 (Dołki wrz 2026)"
+    },
+    {
+     "price": 0.02325,
+     "lo": 0.023,
+     "hi": 0.0235,
+     "kind": "support",
+     "step": "W4",
+     "name": "Wsparcie W4 0,0230–0,0235 (Dołki lip 2026)"
     }
    ],
    "above": [
     {
-     "price": 0.0313,
-     "lo": 0.031,
+     "price": 0.0307,
+     "lo": 0.03,
      "hi": 0.0314,
-     "kind": "midbuy",
-     "step": "0a",
-     "name": "Odkup po pośrednim 0a 0,0313"
+     "kind": "support",
+     "step": "W1",
+     "name": "Wsparcie W1 0,0300–0,0314 (Górna granica zakresu sie–wrz 2026)"
     },
     {
-     "price": 0.0327,
-     "lo": 0.0325,
-     "hi": 0.0329,
-     "kind": "mid",
-     "step": "0a",
-     "name": "Pośredni 0a – przebita podłoga kanału 0,0327 (pośredni) 0,0327"
+     "price": 0.033,
+     "lo": 0.03,
+     "hi": 0.034,
+     "kind": "buy",
+     "step": "start",
+     "name": "Strefa zakupu (start) 0,0300–0,0340"
     },
     {
-     "price": 0.0329,
-     "lo": 0.0328,
-     "hi": 0.033,
-     "kind": "midbuy",
-     "step": "0b",
-     "name": "Odkup po pośrednim 0b 0,0329"
+     "price": 0.038,
+     "lo": 0.0372,
+     "hi": 0.038,
+     "kind": "rebuy",
+     "step": "1a",
+     "name": "Odkup po: Kanał 1, podejście 1: 0,0372–0,0444 0,0380"
     }
    ],
-   "to_stage1_top_pct": 127.27272727,
-   "to_stage2_top_pct": 284.12291933,
+   "to_stage1_top_pct": 175.95722663,
+   "to_stage2_top_pct": 300.13797861,
    "progress_stage1": 0.0,
    "progress_stage2": 0.0,
-   "n_sell_steps": 11
+   "n_sell_steps": 8
   },
   "potwierdzenia": [
    {
-    "warunek": "Sonic: zamknięcie dnia powyżej SMA100 (0,03678)",
+    "warunek": "Sonic: zamknięcie dnia powyżej SMA100 (0,03685)",
     "spelniony": false
    },
    {
-    "warunek": "Sonic: EMA20 (0,03724) powyżej EMA50 (0,03969)",
+    "warunek": "Sonic: EMA20 (0,03656) powyżej EMA50 (0,03931)",
     "spelniony": false
    },
    {
-    "warunek": "BTC: zamknięcie dnia powyżej SMA200 (72 718)",
+    "warunek": "BTC: zamknięcie dnia powyżej SMA200 (72 635)",
     "spelniony": false
    },
    {
@@ -95,15 +95,15 @@
   ],
   "sygnaly_od_startu": [
    {
-    "czas_pl": "18.11 23:00",
-    "typ": "DEEP_TOUCH",
+    "czas_pl": "20.11 03:00",
+    "typ": "DEEP_LOST",
     "krok": "W1",
-    "cena": 0.03119
+    "cena": 0.02909
    }
   ],
   "start_planu": {
    "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
-   "from": "2026-11-18T21:00:00Z",
+   "from": "2026-11-19T07:00:00Z",
    "phase": "HOLD",
    "step": "1a",
    "fill": {
@@ -119,286 +119,235 @@
    "tylko_glowne": [
     {
      "step": "1a",
-     "label": "Schodek 1 – SMA100 (pierwszy opór)",
+     "label": "Kanał 1, podejście 1: 0,0372–0,0444",
      "mid": false,
      "S_in": 98874.0,
-     "sell": 0.0362,
-     "sell_lo": 0.0362,
-     "sell_hi": 0.0368,
-     "usd": 3572.0803224,
-     "usd_lo": 3572.0803224,
-     "usd_hi": 3631.2860736,
-     "rebuy": 0.0342,
-     "S": 104237.89946653,
-     "rebuy_lo": 0.033,
-     "rebuy_hi": 0.0342,
-     "S_hi": 108028.36853804
+     "sell": 0.0408,
+     "sell_lo": 0.0408,
+     "sell_hi": 0.0434,
+     "usd": 4025.9910816,
+     "usd_lo": 4025.9910816,
+     "usd_hi": 4282.5493368,
+     "rebuy": 0.038,
+     "S": 105735.23945886,
+     "rebuy_lo": 0.0372,
+     "rebuy_hi": 0.038,
+     "S_hi": 108009.11557626
     },
     {
      "step": "1",
-     "label": "Schodek 2 – 0,0392",
+     "label": "Kanał 1, podejście 2",
      "mid": false,
-     "S_in": 104237.89946653,
-     "sell": 0.0392,
-     "sell_lo": 0.0392,
-     "sell_hi": 0.041,
-     "usd": 4077.95340777,
-     "usd_lo": 4077.95340777,
-     "usd_hi": 4265.20637037,
-     "rebuy": 0.0362,
-     "S": 112425.34533022,
-     "rebuy_lo": 0.035,
-     "rebuy_hi": 0.0362,
-     "S_hi": 116279.92859869
+     "S_in": 105735.23945886,
+     "sell": 0.0408,
+     "sell_lo": 0.0408,
+     "sell_hi": 0.0434,
+     "usd": 4305.36977438,
+     "usd_lo": 4305.36977438,
+     "usd_hi": 4579.73157373,
+     "rebuy": 0.038,
+     "S": 113072.60617982,
+     "rebuy_lo": 0.0372,
+     "rebuy_hi": 0.038,
+     "S_hi": 115504.27512992
+    },
+    {
+     "step": "2a",
+     "label": "Kanał 2, podejście 1: 0,0497–0,0601",
+     "mid": false,
+     "S_in": 113072.60617982,
+     "sell": 0.058,
+     "sell_lo": 0.058,
+     "sell_hi": 0.06,
+     "usd": 6545.09473611,
+     "usd_lo": 6545.09473611,
+     "usd_hi": 6770.78765805,
+     "rebuy": 0.053,
+     "S": 123245.36880453,
+     "rebuy_lo": 0.051,
+     "rebuy_hi": 0.053,
+     "S_hi": 128078.52052236
     },
     {
      "step": "2",
-     "label": "Krok 2",
+     "label": "Kanał 2, podejście 2",
      "mid": false,
-     "S_in": 112425.34533022,
-     "sell": 0.0437,
-     "sell_lo": 0.043,
-     "sell_hi": 0.0465,
-     "usd": 4903.16161575,
-     "usd_lo": 4824.6212695,
-     "usd_hi": 5217.32300074,
-     "rebuy": 0.0405,
-     "S": 120823.58746957,
-     "rebuy_lo": 0.0388,
-     "rebuy_hi": 0.0405,
-     "S_hi": 126117.40444633
-    },
-    {
-     "step": "3",
-     "label": "Krok 3",
-     "mid": false,
-     "S_in": 120823.58746957,
-     "sell": 0.0493,
-     "sell_lo": 0.0481,
-     "sell_hi": 0.052,
-     "usd": 5944.68965653,
-     "usd_lo": 5799.99132817,
-     "usd_hi": 6270.26089532,
-     "rebuy": 0.045,
-     "S": 131840.00616027,
-     "rebuy_lo": 0.0428,
-     "rebuy_hi": 0.045,
-     "S_hi": 138616.82890682
-    },
-    {
-     "step": "4",
-     "label": "Krok 4",
-     "mid": false,
-     "S_in": 131840.00616027,
-     "sell": 0.055,
-     "sell_lo": 0.0545,
-     "sell_hi": 0.059,
-     "usd": 7236.69793814,
-     "usd_lo": 7170.90977506,
-     "usd_hi": 7763.00324273,
-     "rebuy": 0.051,
-     "S": 141612.24592668,
-     "rebuy_lo": 0.0488,
-     "rebuy_hi": 0.051,
-     "S_hi": 147996.40455453
+     "S_in": 123245.36880453,
+     "sell": 0.058,
+     "sell_lo": 0.058,
+     "sell_hi": 0.06,
+     "usd": 7133.93492788,
+     "usd_lo": 7133.93492788,
+     "usd_hi": 7379.93268402,
+     "rebuy": 0.053,
+     "S": 134333.34071747,
+     "rebuy_lo": 0.051,
+     "rebuy_hi": 0.053,
+     "S_hi": 139601.31486325
     },
     {
      "step": "5",
-     "label": "Szczyt etapu 1",
+     "label": "Fala 2: wybicie ponad szczyt fali 1 (0,071)",
      "mid": false,
-     "S_in": 141612.24592668,
-     "sell": 0.07,
-     "sell_lo": 0.069,
-     "sell_hi": 0.077,
-     "usd": 9893.03150044,
-     "usd_lo": 9751.702479,
-     "usd_hi": 10882.33465048,
-     "rebuy": 0.06,
-     "S": 164554.09062395,
-     "rebuy_lo": 0.055,
-     "rebuy_hi": 0.06,
-     "S_hi": 179513.55340795
+     "S_in": 134333.34071747,
+     "sell": 0.08,
+     "sell_lo": 0.0795,
+     "sell_hi": 0.082,
+     "usd": 10725.17392288,
+     "usd_lo": 10658.14158586,
+     "usd_hi": 10993.30327095,
+     "rebuy": 0.072,
+     "S": 148662.82743107,
+     "rebuy_lo": 0.07,
+     "rebuy_hi": 0.072,
+     "S_hi": 152910.33678624
+    },
+    {
+     "step": "2b",
+     "label": "Krok pośredni 0,07–0,12: 0,092–0,095",
+     "mid": false,
+     "S_in": 148662.82743107,
+     "sell": 0.092,
+     "sell_lo": 0.0915,
+     "sell_hi": 0.095,
+     "usd": 13649.62616341,
+     "usd_lo": 13575.44341252,
+     "usd_hi": 14094.72266874,
+     "rebuy": 0.082,
+     "S": 166125.93794005,
+     "rebuy_lo": 0.08,
+     "rebuy_hi": 0.082,
+     "S_hi": 170279.08638855
     },
     {
      "step": "2d",
      "label": "Szczyt etapu 2",
      "mid": false,
-     "S_in": 164554.09062395,
-     "sell": 0.118,
-     "sell_lo": 0.116,
-     "sell_hi": 0.126,
-     "usd": 19378.54792824,
-     "usd_lo": 19050.09796335,
-     "usd_hi": 20692.34778778,
+     "S_in": 166125.93794005,
+     "sell": 0.116,
+     "sell_lo": 0.114,
+     "sell_hi": 0.12,
+     "usd": 19232.06758344,
+     "usd_lo": 18900.48021132,
+     "usd_hi": 19895.2423277,
      "rebuy": null,
      "S": null
     }
    ],
    "z_posrednimi": [
     {
-     "step": "0a",
-     "label": "Pośredni 0a – przebita podłoga kanału 0,0327",
-     "mid": true,
-     "S_in": 98874.0,
-     "sell": 0.0326,
-     "sell_lo": 0.0325,
-     "sell_hi": 0.0329,
-     "usd": 3216.8458152,
-     "usd_lo": 3206.97819,
-     "usd_hi": 3246.4486908,
-     "rebuy": 0.0314,
-     "S": 102242.4243175,
-     "rebuy_lo": 0.031,
-     "rebuy_hi": 0.0314,
-     "S_hi": 103561.68140547
-    },
-    {
-     "step": "0b",
-     "label": "Pośredni 0b – sufit dawnego kanału",
-     "mid": true,
-     "S_in": 102242.4243175,
-     "sell": 0.034,
-     "sell_lo": 0.034,
-     "sell_hi": 0.0342,
-     "usd": 3469.28994194,
-     "usd_lo": 3469.28994194,
-     "usd_hi": 3489.69752984,
-     "rebuy": 0.033,
-     "S": 104919.73824417,
-     "rebuy_lo": 0.0328,
-     "rebuy_hi": 0.033,
-     "S_hi": 105559.49274566
-    },
-    {
      "step": "1a",
-     "label": "Schodek 1 – SMA100 (pierwszy opór)",
+     "label": "Kanał 1, podejście 1: 0,0372–0,0444",
      "mid": false,
-     "S_in": 104919.73824417,
-     "sell": 0.0362,
-     "sell_lo": 0.0362,
-     "sell_hi": 0.0368,
-     "usd": 3790.49833539,
-     "usd_lo": 3790.49833539,
-     "usd_hi": 3853.32427465,
-     "rebuy": 0.0342,
-     "S": 110611.61809121,
-     "rebuy_lo": 0.033,
-     "rebuy_hi": 0.0342,
-     "S_hi": 114633.85874907
+     "S_in": 98874.0,
+     "sell": 0.0408,
+     "sell_lo": 0.0408,
+     "sell_hi": 0.0434,
+     "usd": 4025.9910816,
+     "usd_lo": 4025.9910816,
+     "usd_hi": 4282.5493368,
+     "rebuy": 0.038,
+     "S": 105735.23945886,
+     "rebuy_lo": 0.0372,
+     "rebuy_hi": 0.038,
+     "S_hi": 108009.11557626
     },
     {
      "step": "1",
-     "label": "Schodek 2 – 0,0392",
+     "label": "Kanał 1, podejście 2",
      "mid": false,
-     "S_in": 110611.61809121,
-     "sell": 0.0392,
-     "sell_lo": 0.0392,
-     "sell_hi": 0.041,
-     "usd": 4327.30347832,
-     "usd_lo": 4327.30347832,
-     "usd_hi": 4526.00618906,
-     "rebuy": 0.0362,
-     "S": 119299.69257902,
-     "rebuy_lo": 0.035,
-     "rebuy_hi": 0.0362,
-     "S_hi": 123389.96775315
+     "S_in": 105735.23945886,
+     "sell": 0.0408,
+     "sell_lo": 0.0408,
+     "sell_hi": 0.0434,
+     "usd": 4305.36977438,
+     "usd_lo": 4305.36977438,
+     "usd_hi": 4579.73157373,
+     "rebuy": 0.038,
+     "S": 113072.60617982,
+     "rebuy_lo": 0.0372,
+     "rebuy_hi": 0.038,
+     "S_hi": 115504.27512992
+    },
+    {
+     "step": "2a",
+     "label": "Kanał 2, podejście 1: 0,0497–0,0601",
+     "mid": false,
+     "S_in": 113072.60617982,
+     "sell": 0.058,
+     "sell_lo": 0.058,
+     "sell_hi": 0.06,
+     "usd": 6545.09473611,
+     "usd_lo": 6545.09473611,
+     "usd_hi": 6770.78765805,
+     "rebuy": 0.053,
+     "S": 123245.36880453,
+     "rebuy_lo": 0.051,
+     "rebuy_hi": 0.053,
+     "S_hi": 128078.52052236
     },
     {
      "step": "2",
-     "label": "Krok 2",
+     "label": "Kanał 2, podejście 2",
      "mid": false,
-     "S_in": 119299.69257902,
-     "sell": 0.0437,
-     "sell_lo": 0.043,
-     "sell_hi": 0.0465,
-     "usd": 5202.96977257,
-     "usd_lo": 5119.62700734,
-     "usd_hi": 5536.34083351,
-     "rebuy": 0.0405,
-     "S": 128211.45266732,
-     "rebuy_lo": 0.0388,
-     "rebuy_hi": 0.0405,
-     "S_hi": 133828.96476872
-    },
-    {
-     "step": "3",
-     "label": "Krok 3",
-     "mid": false,
-     "S_in": 128211.45266732,
-     "sell": 0.0493,
-     "sell_lo": 0.0481,
-     "sell_hi": 0.052,
-     "usd": 6308.18296727,
-     "usd_lo": 6154.63693155,
-     "usd_hi": 6653.66154762,
-     "rebuy": 0.045,
-     "S": 139901.48002959,
-     "rebuy_lo": 0.0428,
-     "rebuy_hi": 0.045,
-     "S_hi": 147092.6776012
-    },
-    {
-     "step": "4",
-     "label": "Krok 4",
-     "mid": false,
-     "S_in": 139901.48002959,
-     "sell": 0.055,
-     "sell_lo": 0.0545,
-     "sell_hi": 0.059,
-     "usd": 7679.19223882,
-     "usd_lo": 7609.38140029,
-     "usd_hi": 8237.6789471,
-     "rebuy": 0.051,
-     "S": 150271.25204601,
-     "rebuy_lo": 0.0488,
-     "rebuy_hi": 0.051,
-     "S_hi": 157045.77570382
-    },
-    {
-     "step": "4a",
-     "label": "Pośredni 4a",
-     "mid": true,
-     "S_in": 150271.25204601,
-     "sell": 0.0595,
-     "sell_lo": 0.059,
-     "sell_hi": 0.0617,
-     "usd": 8923.25721774,
-     "usd_lo": 8848.27186297,
-     "usd_hi": 9253.19277874,
-     "rebuy": 0.0565,
-     "S": 157617.88855413,
-     "rebuy_lo": 0.0545,
-     "rebuy_hi": 0.0565,
-     "S_hi": 163402.03125336
+     "S_in": 123245.36880453,
+     "sell": 0.058,
+     "sell_lo": 0.058,
+     "sell_hi": 0.06,
+     "usd": 7133.93492788,
+     "usd_lo": 7133.93492788,
+     "usd_hi": 7379.93268402,
+     "rebuy": 0.053,
+     "S": 134333.34071747,
+     "rebuy_lo": 0.051,
+     "rebuy_hi": 0.053,
+     "S_hi": 139601.31486325
     },
     {
      "step": "5",
-     "label": "Szczyt etapu 1",
+     "label": "Fala 2: wybicie ponad szczyt fali 1 (0,071)",
      "mid": false,
-     "S_in": 157617.88855413,
-     "sell": 0.07,
-     "sell_lo": 0.069,
-     "sell_hi": 0.077,
-     "usd": 11011.18569439,
-     "usd_lo": 10853.88304161,
-     "usd_hi": 12112.30426383,
-     "rebuy": 0.06,
-     "S": 183152.72205005,
-     "rebuy_lo": 0.055,
-     "rebuy_hi": 0.06,
-     "S_hi": 199802.96950914
+     "S_in": 134333.34071747,
+     "sell": 0.08,
+     "sell_lo": 0.0795,
+     "sell_hi": 0.082,
+     "usd": 10725.17392288,
+     "usd_lo": 10658.14158586,
+     "usd_hi": 10993.30327095,
+     "rebuy": 0.072,
+     "S": 148662.82743107,
+     "rebuy_lo": 0.07,
+     "rebuy_hi": 0.072,
+     "S_hi": 152910.33678624
+    },
+    {
+     "step": "2b",
+     "label": "Krok pośredni 0,07–0,12: 0,092–0,095",
+     "mid": false,
+     "S_in": 148662.82743107,
+     "sell": 0.092,
+     "sell_lo": 0.0915,
+     "sell_hi": 0.095,
+     "usd": 13649.62616341,
+     "usd_lo": 13575.44341252,
+     "usd_hi": 14094.72266874,
+     "rebuy": 0.082,
+     "S": 166125.93794005,
+     "rebuy_lo": 0.08,
+     "rebuy_hi": 0.082,
+     "S_hi": 170279.08638855
     },
     {
      "step": "2d",
      "label": "Szczyt etapu 2",
      "mid": false,
-     "S_in": 183152.72205005,
-     "sell": 0.118,
-     "sell_lo": 0.116,
-     "sell_hi": 0.126,
-     "usd": 21568.7971595,
-     "usd_lo": 21203.22432629,
-     "usd_hi": 23031.08849235,
+     "S_in": 166125.93794005,
+     "sell": 0.116,
+     "sell_lo": 0.114,
+     "sell_hi": 0.12,
+     "usd": 19232.06758344,
+     "usd_lo": 18900.48021132,
+     "usd_hi": 19895.2423277,
      "rebuy": null,
      "S": null
     }
@@ -412,80 +361,80 @@
  },
  "btc": {
   "dane": {
-   "cena": 63470.0,
-   "zmiana_7d_pct": -14.15,
-   "zmiana_30d_pct": -22.45,
-   "vs_sma50_pct": -19.23,
-   "vs_sma200_pct": -12.72,
-   "vs_sma200tyg_pct": -7.424,
-   "mayer": 0.8728,
-   "rsi_d": 21.76,
-   "rsi_tyg": 37.36,
-   "macd_hist": -1028.0,
-   "realized_price": 53800.0,
-   "mvrv": 1.328,
-   "open_interest_usd": 5292000000.0,
-   "oi_zmiana_7d_pct": -19.1,
-   "funding_8h_pct": 0.002274,
-   "strach_chciwosc": 10,
-   "dominacja_btc_pct": 58.14,
+   "cena": 61500.0,
+   "zmiana_7d_pct": -13.83,
+   "zmiana_30d_pct": -25.85,
+   "vs_sma50_pct": -21.3,
+   "vs_sma200_pct": -15.33,
+   "vs_sma200tyg_pct": -10.29,
+   "mayer": 0.8467,
+   "rsi_d": 20.52,
+   "rsi_tyg": 35.59,
+   "macd_hist": -1003.0,
+   "realized_price": 53750.0,
+   "mvrv": 1.271,
+   "open_interest_usd": 5325000000.0,
+   "oi_zmiana_7d_pct": -21.13,
+   "funding_8h_pct": 0.003309,
+   "strach_chciwosc": 12,
+   "dominacja_btc_pct": 58.0,
    "ocena_tla_dla_altcoinow": "neutralne"
   },
-  "cena": 63468.85,
-  "zmiana_24h_pct": -2.16473125,
+  "cena": 61498.26,
+  "zmiana_24h_pct": -2.35536634,
   "poziomy": [
    {
-    "cena": 72718.27295,
-    "opis": "SMA200 72 718",
-    "odl_pct": 14.57316928,
+    "cena": 72635.04465,
+    "opis": "SMA200 72 635",
+    "odl_pct": 18.10910528,
     "w_strefie": false
    },
    {
     "cena": 70000,
     "opis": "Opór 69–70 tys.",
-    "odl_pct": 10.29032352,
+    "odl_pct": 13.82435861,
     "w_strefie": false
    },
    {
     "cena": 67000,
     "opis": "Opór 66–67 tys.",
-    "odl_pct": 5.56359537,
+    "odl_pct": 8.94617181,
     "w_strefie": false
    },
    {
     "cena": 65100,
     "opis": "Szczyt odbicia 65,1 tys.",
-    "odl_pct": 2.57000087,
+    "odl_pct": 5.85665351,
     "w_strefie": false
    },
    {
     "cena": 64450,
     "opis": "Poziom przebicia 64,3–64,45 tys.",
-    "odl_pct": 1.54587644,
+    "odl_pct": 4.79971303,
     "w_strefie": false
    },
    {
     "cena": 63800,
     "opis": "Wsparcie kluczowe 63,8 tys.",
-    "odl_pct": 0.52175201,
+    "odl_pct": 3.74277256,
     "w_strefie": false
    },
    {
     "cena": 62500,
     "opis": "Retest dna 62–63,9 tys.",
-    "odl_pct": -1.52649686,
-    "w_strefie": true
+    "odl_pct": 1.62889161,
+    "w_strefie": false
    },
    {
     "cena": 59500,
     "opis": "Wariant głębszy 58–61 tys.",
-    "odl_pct": -6.25322501,
+    "odl_pct": -3.24929518,
     "w_strefie": false
    },
    {
     "cena": 50000,
     "opis": "Wariant bessy ~50 tys.",
-    "odl_pct": -21.22119749,
+    "odl_pct": -18.69688671,
     "w_strefie": false
    }
   ],
@@ -506,99 +455,99 @@
   "wskazniki": [
    {
     "nazwa": "Cena vs średnia 200 dni",
-    "wartosc": -12.71953056,
+    "wartosc": -15.33252262,
     "ocena": "negatywny"
    },
    {
     "nazwa": "Cena vs średnia 50 dni",
-    "wartosc": -19.22827481,
+    "wartosc": -21.30257118,
     "ocena": "negatywny"
    },
    {
     "nazwa": "Cena vs średnia 200 tygodni",
-    "wartosc": -7.42388764,
+    "wartosc": -10.28530016,
     "ocena": "negatywny"
    },
    {
     "nazwa": "Mnożnik Mayera (cena / SMA200)",
-    "wartosc": 0.87280469,
+    "wartosc": 0.84667477,
     "ocena": "neutralny"
    },
    {
     "nazwa": "RSI dzienny (14)",
-    "wartosc": 21.75572104,
+    "wartosc": 20.52367654,
     "ocena": "pozytywny"
    },
    {
     "nazwa": "RSI tygodniowy (14)",
-    "wartosc": 37.35635159,
+    "wartosc": 35.59194421,
     "ocena": "neutralny"
    },
    {
     "nazwa": "MACD (histogram)",
-    "wartosc": -1028.4468276,
+    "wartosc": -1003.10015767,
     "ocena": "neutralny"
    },
    {
     "nazwa": "Realized Price (średni koszt zakupu wszystkich BTC)",
-    "wartosc": 53800.36,
+    "wartosc": 53749.84,
     "ocena": "neutralny"
    },
    {
     "nazwa": "MVRV (wycena rynkowa / realizowana)",
-    "wartosc": 1.3277,
+    "wartosc": 1.2708,
     "ocena": "neutralny"
    },
    {
     "nazwa": "Open Interest (otwarte kontrakty)",
-    "wartosc": 5292138675.943788,
+    "wartosc": 5324906747.487554,
     "ocena": "neutralny"
    },
    {
     "nazwa": "Funding (opłata long↔short, 8h)",
-    "wartosc": 0.00227433,
+    "wartosc": 0.00330889,
     "ocena": "neutralny"
    },
    {
     "nazwa": "Indeks strachu i chciwości",
-    "wartosc": 10,
+    "wartosc": 12,
     "ocena": "pozytywny"
    },
    {
     "nazwa": "Dominacja BTC",
-    "wartosc": 58.1380449,
+    "wartosc": 58.0004084,
     "ocena": "neutralny"
    }
   ],
   "kontrakty": [
    {
     "source": "Hyperliquid",
-    "oi_usd": 2459552918.19504,
+    "oi_usd": 2455410690.742704,
     "funding_8h_pct": 0.01,
-    "volume_24h_usd": 4343308188.111207
+    "volume_24h_usd": 5084598749.158954
    },
    {
     "source": "OKX",
-    "oi_usd": 2106837267.748747,
-    "funding_8h_pct": -0.00323201
+    "oi_usd": 2128154856.7448494,
+    "funding_8h_pct": 0.00055868
    },
    {
     "source": "Deribit",
-    "oi_usd": 725748490.0,
-    "funding_8h_pct": 5.5e-05
+    "oi_usd": 741341200.0,
+    "funding_8h_pct": -0.000632
    }
   ]
  },
  "sonic": {
-  "cena": 0.03124,
-  "swieca": "2026-11-18",
-  "zmiana_7d_pct": -13.37,
-  "zmiana_30d_pct": -46.76,
-  "zmiana_90d_pct": 24.61,
-  "od_ATH_pct": -99.1,
+  "cena": 0.02899,
+  "swieca": "2026-11-19",
+  "zmiana_7d_pct": -22.78,
+  "zmiana_30d_pct": -49.65,
+  "zmiana_90d_pct": 1.577,
+  "od_ATH_pct": -99.17,
   "ATH": 3.484,
-  "razy_od_ATL": 18.38,
-  "pozycja_w_zakresie_12m_pct": 11.62,
+  "razy_od_ATL": 17.05,
+  "pozycja_w_zakresie_12m_pct": 9.551,
   "kierunek": {
    "short_term": "w dół",
    "medium_term": "w dół",
@@ -626,7 +575,7 @@
     "ostatnie": [
      "LL 0.01901 2026-06-25",
      "HH 0.07393 2026-10-13",
-     "HL 0.0304 2026-11-18"
+     "HL 0.02977 2026-11-19"
     ]
    },
    "drobny": {
@@ -634,44 +583,44 @@
     "ostatnie": [
      "HL 0.02479 2026-09-16",
      "HH 0.07393 2026-10-13",
-     "HL 0.0304 2026-11-18"
+     "HL 0.02977 2026-11-19"
     ]
    }
   },
   "fibo": [
    {
-    "ruch": "0.07393->0.0304 (2026-10-13–2026-11-18)",
-    "zniesione_pct": 1.93,
+    "ruch": "0.07393->0.02977 (2026-10-13–2026-11-19)",
+    "zniesione_pct": -1.766,
     "poziomy": {
-     "0.382": 0.04703,
-     "0.5": 0.05217,
-     "0.618": 0.0573,
-     "0.786": 0.06461
+     "0.382": 0.04664,
+     "0.5": 0.05185,
+     "0.618": 0.05706,
+     "0.786": 0.06448
     }
    },
    {
-    "ruch": "0.07393->0.0304 (2026-10-13–2026-11-18)",
-    "zniesione_pct": 1.93,
+    "ruch": "0.07393->0.02977 (2026-10-13–2026-11-19)",
+    "zniesione_pct": -1.766,
     "poziomy": {
-     "0.382": 0.04703,
-     "0.5": 0.05217,
-     "0.618": 0.0573,
-     "0.786": 0.06461
+     "0.382": 0.04664,
+     "0.5": 0.05185,
+     "0.618": 0.05706,
+     "0.786": 0.06448
     }
    }
   ],
   "wsparcia": [
    {
-    "cena": 0.02746,
-    "odl_pct": -12.09,
+    "cena": 0.02818,
+    "odl_pct": -2.8,
     "zrodla": [
      "plan: Wsparcie W2 0,0270–0,0280 (Dołki cze/sie 2026)",
      "LH z 29.07.2019 (pośredni, drobny)"
     ]
    },
    {
-    "cena": 0.02519,
-    "odl_pct": -19.36,
+    "cena": 0.02525,
+    "odl_pct": -12.9,
     "zrodla": [
      "plan: Wsparcie W3 0,0248–0,0261 (Dołki wrz 2026)",
      "LH z 25.11.2020 (pośredni, drobny)"
@@ -679,7 +628,7 @@
    },
    {
     "cena": 0.0234,
-    "odl_pct": -25.09,
+    "odl_pct": -19.27,
     "zrodla": [
      "plan: Wsparcie W4 0,0230–0,0235 (Dołki lip 2026)",
      "HL z 07.10.2020 (pośredni, drobny)"
@@ -688,55 +637,55 @@
   ],
   "opory": [
    {
-    "cena": 0.03274,
-    "odl_pct": 4.791,
+    "cena": 0.03291,
+    "odl_pct": 13.52,
     "zrodla": [
      "plan: Wsparcie W1 0,0300–0,0314 (Górna granica zakresu sie–wrz 2026)",
-     "plan: Odkup po pośrednim 0a 0,0313"
+     "plan: Strefa zakupu (start) 0,0300–0,0340"
     ]
    },
    {
-    "cena": 0.03771,
-    "odl_pct": 20.71,
+    "cena": 0.03746,
+    "odl_pct": 29.22,
     "zrodla": [
      "LL z 28.02.2026 (główny, pośredni, drobny)",
-     "plan: Sprzedaż – Schodek 1 – SMA100 (pierwszy opór) 0,0362"
+     "plan: Odkup po: Kanał 1, podejście 1: 0,0372–0,0444 0,0380"
     ]
    },
    {
-    "cena": 0.04587,
-    "odl_pct": 46.83,
+    "cena": 0.04068,
+    "odl_pct": 40.32,
     "zrodla": [
-     "H z 11.06.2019 (cykl, główny, pośredni, drobny)",
-     "LH z 19.09.2020 (główny, pośredni, drobny)"
+     "plan: Sprzedaż – Kanał 1, podejście 1: 0,0372–0,0444 0,0408",
+     "plan: Sprzedaż – Kanał 1, podejście 2 0,0408"
     ]
    }
   ],
   "wskazniki": {
-   "rsi": 32.61,
-   "rsi_w": 42.13,
-   "macd_hist": -0.000363,
-   "dist_sma50_pct": -28.73,
-   "dist_sma200_pct": -9.121,
-   "pctb": -0.0142,
-   "atr_pct": 11.35
+   "rsi": 30.85,
+   "rsi_w": 41.5,
+   "macd_hist": -0.000429,
+   "dist_sma50_pct": -31.11,
+   "dist_sma200_pct": -12.41,
+   "pctb": -0.03639,
+   "atr_pct": 11.41
   },
   "podobienstwo_do_dolka": "3/7",
   "podobienstwo_do_szczytu": "0/7",
   "ksiega_coinbase": {
-   "popyt_5pct_usd": 83050.0,
-   "podaz_5pct_usd": 62030.0,
-   "przewaga_kupna_pct": 57.25,
-   "sciana_kupna": 0.03109,
-   "sciana_sprzedazy": 0.0314
+   "popyt_5pct_usd": 79400.0,
+   "podaz_5pct_usd": 64600.0,
+   "przewaga_kupna_pct": 55.14,
+   "sciana_kupna": 0.02885,
+   "sciana_sprzedazy": 0.02913
   },
   "coingecko": {
-   "ranking": 189,
-   "sentyment_pozytywny_pct": 87.5,
+   "ranking": 208,
+   "sentyment_pozytywny_pct": 50.0,
    "gieldy": [
-    "BitDelta 60%",
-    "Binance 6%",
-    "WhiteBIT 5%"
+    "BitDelta 63%",
+    "WhiteBIT 7%",
+    "Binance 5%"
    ]
   },
   "setupy_pomocnicze": {
@@ -744,7 +693,7 @@
     "aktywny": false,
     "warunki": {
      "Cena w korekcie dotknęła linii Fibo 0.618/0.786 lub poziomu historycznego (±3.5%)": false,
-     "Cena w korekcie nie przekroczyła poziomu unieważnienia (Fibo 0.886)": true,
+     "Cena w korekcie nie przekroczyła poziomu unieważnienia (Fibo 0.886)": false,
      "Świeca dzienna wzrostowa, zamknięcie w górnej połowie": false,
      "Stop i cel po właściwych stronach ceny": true
     },
@@ -754,11 +703,11 @@
     ],
     "uniewaznienie": 0.03039,
     "cel": 0.07393,
-    "odl_do_strefy_pct": 44.32,
+    "odl_do_strefy_pct": 55.52,
     "historia": {
-     "n": 48,
-     "trafnosc_pct": 50.0,
-     "sredni_R": 0.245
+     "n": 50,
+     "trafnosc_pct": 48.0,
+     "sredni_R": 0.1952
     }
    },
    "SHORT": {
@@ -779,8 +728,8 @@
   },
   "plan_etapowy": {
    "faza": "HOLD",
-   "co_robic_teraz": "Trzymamy Sonica. Zlecenie sprzedaży z limitem: Schodek 1 – SMA100 (pierwszy opór) 0,0362 (widełki 0,0362–0,0368, główny poziom 0,0362; wariant ostrożny).",
-   "cel_sprzedazy": 0.0362,
+   "co_robic_teraz": "Trzymamy Sonica. Zlecenie sprzedaży z limitem: Kanał 1, podejście 1: 0,0372–0,0444 0,0408 (widełki 0,0408–0,0434, główny poziom 0,0408; wariant ostrożny).",
+   "cel_sprzedazy": 0.0408,
    "strefa_zakupu": [
     null,
     null
@@ -795,7 +744,7 @@
     "W6 0.019–0.0196 (Dno cyklu 25.06.2026; skrajny scenariusz)"
    ],
    "ostatnie_sygnaly": [
-    "18.11 23:00 DEEP_TOUCH W1"
+    "20.11 03:00 DEEP_LOST W1"
    ],
    "uwaga": "Plan etapowy jest nadrzędny. Komentarz ma się do niego odnosić, nie proponować innych poziomów wejścia/wyjścia."
   },
@@ -806,10 +755,10 @@
    "Setup SHORT (odbicie do 0.618/0.786 spadku, swing 40%, świeca spadkowa): 29 transakcji, trafność 55%, średnio +0.16R – przewaga słabsza i niestabilna w czasie (2019–22: +0.39R, 2023–26: −0.09R), dlatego sygnał SHORT ma niższą pewność."
   ],
   "elliott_obecnie": "0.01901 → 0.07393 (13.10.2026): ×3.9, odbicie wyniosło 139% poprzedniego spadku 0.05862 → 0.01901, co zmieniło strukturę na poziomie pośrednim (pierwszy HH od 2024). Jeżeli to fala 1, typowa dla tego aktywa fala 2 znosi 61.8–88.6% (historycznie: 80% i 85% w cyklu 2020–21). Unieważnienie scenariusza wzrostowego: zejście poniżej 0.01901.",
-  "zmiana_24h_pct": -3.13178295,
+  "zmiana_24h_pct": -5.75422627,
   "wsparcia_techniczne": [
    {
-    "cena": 0.02746363,
+    "cena": 0.02817817,
     "zrodla": [
      "plan: Wsparcie W2 0,0270–0,0280 (Dołki cze/sie 2026)",
      "LH z 29.07.2019 (pośredni, drobny)",
@@ -817,7 +766,7 @@
     ]
    },
    {
-    "cena": 0.02519179,
+    "cena": 0.02525041,
     "zrodla": [
      "plan: Wsparcie W3 0,0248–0,0261 (Dołki wrz 2026)",
      "LH z 25.11.2020 (pośredni, drobny)",
@@ -851,42 +800,43 @@
   ],
   "opory_techniczne": [
    {
-    "cena": 0.03273685,
+    "cena": 0.03291073,
     "zrodla": [
      "plan: Wsparcie W1 0,0300–0,0314 (Górna granica zakresu sie–wrz 2026)",
-     "plan: Odkup po pośrednim 0a 0,0313",
-     "plan: Pośredni 0a – przebita podłoga kanału 0,0327 (pośredni) 0,0327"
+     "plan: Strefa zakupu (start) 0,0300–0,0340",
+     "LH z 03.07.2019 (pośredni, drobny)"
     ]
    },
    {
-    "cena": 0.03771127,
+    "cena": 0.03746038,
     "zrodla": [
      "LL z 28.02.2026 (główny, pośredni, drobny)",
-     "plan: Sprzedaż – Schodek 1 – SMA100 (pierwszy opór) 0,0362",
-     "plan: Odkup po: Schodek 2 – 0,0392 0,0362"
+     "plan: Odkup po: Kanał 1, podejście 1: 0,0372–0,0444 0,0380",
+     "plan: Odkup po: Kanał 1, podejście 2 0,0380"
     ]
    },
    {
-    "cena": 0.04586894,
+    "cena": 0.04067762,
+    "zrodla": [
+     "plan: Sprzedaż – Kanał 1, podejście 1: 0,0372–0,0444 0,0408",
+     "plan: Sprzedaż – Kanał 1, podejście 2 0,0408",
+     "Fibo 23,6% spadku 13.10.2026–19.11.2026"
+    ]
+   },
+   {
+    "cena": 0.04625695,
     "zrodla": [
      "H z 11.06.2019 (cykl, główny, pośredni, drobny)",
      "LH z 19.09.2020 (główny, pośredni, drobny)",
-     "plan: Odkup po: Krok 3 0,0440"
+     "opór konsolidacji 29.10.2026–18.11.2026 (21 dni)"
     ]
    },
    {
-    "cena": 0.05024938,
+    "cena": 0.0526836,
     "zrodla": [
-     "plan: Odkup po: Krok 4 0,0500",
-     "plan: Sprzedaż – Krok 3 0,0505"
-    ]
-   },
-   {
-    "cena": 0.05250573,
-    "zrodla": [
-     "Fibo 50,0% spadku 13.10.2026–18.11.2026",
-     "Fibo 50,0% spadku 13.10.2026–18.11.2026",
-     "opór konsolidacji 31.01.2026–01.06.2026 (122 dni)"
+     "plan: Odkup po: Kanał 2, podejście 1: 0,0497–0,0601 0,0530",
+     "plan: Odkup po: Kanał 2, podejście 2 0,0530",
+     "Fibo 50,0% spadku 13.10.2026–19.11.2026"
     ]
    }
   ]
@@ -894,10 +844,10 @@
  "ai": {
   "model": "openai/gpt-oss-120b",
   "komentarz": {
-   "BTC": "**[BTC]**\n\nBitcoin (BTC) w ostatnim tygodniu utrzymuje się w silnym trendzie spadkowym. Cena wynosi **63 470 USD**, co oznacza **‑14,15 %** w stosunku do poziomu sprzed 7 dni i **‑22,45 %** w perspektywie 30 dni. Na wykresie dziennym BTC znajduje się **‑19,23 %** poniżej średniej kroczącej 50‑dni (SMA‑50) oraz **‑12,72 %** poniżej średniej 200‑dni (SMA‑200). Tygodniowy wskaźnik siły względnej (RSI‑D) wynosi **21,76**, czyli poziom wyraźnie w strefie wyprzedania, a tygodniowy RSI (RSI‑tyg) jest nieco wyższy – **37,36**, co sugeruje, że presja sprzedażowa nieco słabnie, ale nadal dominuje. MACD (wskaźnik zbieżności i rozbieżności średnich kroczących) ma ujemny histogram **‑1 028**, potwierdzając momentum spadkowe.\n\nZ perspektywy podaży i popytu, **open interest** (otwarte pozycje kontraktów futures) spadł o **‑19,1 %** w ciągu tygodnia, osiągając **5,29 mld USD**. Taki spadek otwartych pozycji zwykle wskazuje na zmniejszające się zainteresowanie spekulantów, co może dodatkowo ograniczyć krótkoterminowy impuls wzrostowy. Jednocześnie wskaźnik **MVRV** (stosunek rynkowej kapitalizacji do zrealizowanej wartości) wynosi **1,328**, co sugeruje, że rynek jest nieco przewartościowany względem średniej ceny, po której inwestorzy faktycznie sprzedali swoje pozycje (realized price = 53 800 USD). \n\nMakroekonomiczne tło nie sprzyja odbiciu BTC. Fed utrzymał stopy procentowe w przedziale **3,75 %‑4,00 %**, a rynek wycenia **≈90 %** szans na kolejną podwyżkę o **0,25 pp** w grudniu. Wzrost inflacji konsumenckiej (CPI + 0,4 % m/m, rocznie ≈ 3,9‑4,0 %) oraz rosnące rentowności obligacji skarbowych (US‑Treasury yields) podnoszą koszt kapitału, co tradycyjnie obciąża aktywa ryzykowne, w tym kryptowaluty. Dolar umocnił się po danych CPI, a wyższe stopy procentowe zwiększają atrakcyjność obligacji względem BTC. Dodatkowo, w tygodniu 5‑11 listopada nastąpił **netto wyjście 1,07 mld USD** z funduszy ETF‑ów Bitcoin, co odzwierciedla rosnącą niechęć inwestorów instytucjonalnych.\n\n**Scenariusze i kluczowe poziomy**  \n- **Poziom wsparcia**: najbliższy techniczny poziom wsparcia znajduje się w okolicach **SMA‑200**, czyli około **72 500 USD** (obecnie –12,7 %). Przebicie poniżej tej linii może otworzyć drogę do dalszych spadków w kierunku **60 000 USD**.  \n- **Poziom oporu**: najbliższy opór to poziom **SMA‑50** (~**78 500 USD**) oraz historyczne maksimum z ostatnich 3 miesięcy (~**84 000 USD**). Odwrócenie trendu wymagałoby odbicia od SMA‑200 i zamknięcia powyżej SMA‑50, co przy obecnym nastroju makro i słabym przepływie kapitału wydaje się mało prawdopodobne w krótkim terminie.  \n- **Alternatywne scenariusze**: przy dalszych podwyżkach stóp i utrzymaniu wysokiej inflacji, presja na ryzyko może się nasilić, co spowoduje dalsze spadki BTC i zwiększy atrakcyjność **altcoinów** (alternatywnych kryptowalut) wśród inwestorów szukających niższych korelacji z rynkiem tradycyjnym. Ocena tła dla altcoinów w danych wynosi **neutralne**, co oznacza, że ich zachowanie będzie w dużej mierze zależało od indywidualnych czynników projektowych, a nie od ogólnego nastroju rynkowego.\n\nPodsumowując, bieżące dane wskazują na **kontynuację trendu spadkowego** BTC w najbliższych tygodniach, przy jednoczesnym braku wyraźnych sygnałów odwrócenia. Inwestorzy powinni monitorować: (1) decyzję Fed z 8 grudnia i ewentualną podwyżkę stóp; (2) dalsze zmiany w otwartym zainteresowaniu kontraktami futures; oraz (3) przepływy kapitałowe w produktach ETF‑owych, które mogą dostarczyć dodatkowych wskazówek co do krótkoterminowego sentymentu."
+   "BTC": "**[BTC]**  \n\nBitcoin (BTC) utrzymuje się w trudnym otoczeniu makroekonomicznym. Fed niedawno pozostawił stopy procentowe w przedziale 3,75 %‑4,00 % i sygnalizuje możliwość kolejnych podwyżek – rynek wycenia ok. 90 % szans na podwyżkę o 25 pb w grudniu oraz kolejną w marcu. Wzrost CPI w październiku (0,4 % m/m, rocznie ok. 3,9‑4,0 %) oraz Core PCE (0,4 % m/m, rocznie ok. 3,3 %) potwierdzają utrzymujące się presje inflacyjne, co sprzyja silnemu dolarowi (DXY ≈ 103,9 – najwyższy od 19 miesięcy). Wysoki dolar i rosnące rentowności obligacji (10‑letnie Treasury 5,016 %) tradycyjnie działają na niekorzyść aktywów ryzykownych, w tym kryptowalut. Dodatkowo, przepływy do spot‑ETF‑ów BTC są wyraźnie negatywne – w ostatnim tygodniu odnotowano netto wyjście 185,5 mln USD, a w pięciu sesjach łącznie – ponad 1 mld USD.  \n\nZ perspektywy technicznej Bitcoin znajduje się znacznie poniżej kluczowych średnich kroczących: 21,3 % pod SMA‑50 (średnia krocząca 50‑dni) i 15,33 % pod SMA‑200 (średnia krocząca 200‑dni). Na wykresie tygodniowym odległość od SMA‑200 wynosi 10,29 %. Wskaźnik RSI (Relative Strength Index – wskaźnik siły względnej) na wykresie dziennym jest na poziomie 20,52, co klasyfikuje rynek jako **przeprzedany**; na wykresie tygodniowym RSI wynosi 35,59, wciąż w dolnej połowie zakresu. Histogram MACD (Moving Average Convergence Divergence – wskaźnik trendu) jest ujemny (‑1003), co potwierdza krótkoterminowy trend spadkowy.  \n\nDominacja Bitcoina w rynku kryptowalut wynosi 58 %, a ocena tła dla altcoinów jest określona jako **neutralna**. Oznacza to, że choć Bitcoin traci na wartości, nie ma wyraźnych sygnałów, aby inwestorzy masowo przerzucali środki na altcoiny; ewentualne ruchy kapitału mogą być ograniczone do dalszych wyprzedaży lub krótkoterminowych korekt.  \n\n**Scenariusze cenowe** (bez rekomendacji inwestycyjnych):  \n- **Scenariusz pesymistyczny** – przy dalszych podwyżkach stóp i utrzymaniu silnego dolara, BTC może testować poziom wsparcia wokół **$55 000‑$57 000** (realized price = $53 750, MVRV = 1,27 wskazuje, że cena jest nieco powyżej średniej kosztu realizacji).  \n- **Scenariusz umiarkowany** – przy stabilizacji polityki pieniężnej i ewentualnym odwróceniu negatywnych przepływów ETF‑ów, możliwe odbicie w kierunku **$62 000‑$65 000** (obecna cena $61 500).  \n- **Scenariusz optymistyczny** – w przypadku niespodziewanego złagodzenia inflacji, spadku DXY i odwrócenia trendu w przepływach ETF‑ów, BTC mógłby przebić SMA‑50 i skierować się ku poziomowi **$70 000‑$75 000**.  \n\nObecnie wskaźniki techniczne i makro wskazują na **kontynuację presji spadkowej**, ale jednocześnie poziomy wsparcia nie są jeszcze wyczerpane, co pozostawia otwartą możliwość krótkoterminowego odbicia przy zmianie warunków rynkowych."
   },
-  "research_makro": "- **Ostatnia decyzja FED (FOMC 27‑28 paź 2026)** – stopy w przedziale **3,75 %‑4,00 %**; 2 z 12 głosujących (Lisa Cook, Beth Hammack) opowiedziały się za podwyżką o 0,25 pp.  \n- **Następne posiedzenie** – **8 grudnia 2026** (kolejna decyzja o stopach). Rynek wycenia **≈90 % szans na podwyżkę 25 pp**.  \n- **Oczekiwania rynku** – średnia prognoza FedWatch: **25 pp w grudniu, kolejny w marcu 2027**.  \n- **CPI (październik 2026)** – +0,4 % m/m; szacowany roczny wzrost **≈3,9‑4,0 %**; core CPI +0,3 % m/m, rocznie **≈2,8 %**.  \n- **PCE (paź 2026)** – szacowany wzrost **0,4 % m/m**, rocznie **≈3,3 %**.  \n- **Przepływy do ETF‑ów BTC (tydzień 5‑11 lis 2026)** – **netto wyjście 1,07 mld USD** (drugi tydzień z > 1 mld odpływów).  \n- **Ropa** – Brent ok. **$93 / barrl**, WTI ≈ $82 / barrl (podażowy nadmiar, napięcia w Zatoce Perskiej).  \n- **Dolar** – umocnił się wobec koszyka walut po danych CPI.  \n- **Rentowności** – US‑Treasury yields podskoczyły po CPI, ceny obligacji spadły (trend wyższych stóp).  \n- **Geopolityka** – trwający konflikt USA‑Iran podnosi ceny ropy; USA przygotowuje kolejne sankcje, co zwiększa niepewność rynkową.\n\n**Źródła:**  \nhttps://www.cnbc.com/2026/10/28/fed-interest-rate-decision-october-2026.html  \nhttps://www.reuters.com/5f374b32b07b/world/us/us-consumer-prices-rise-above-expectations-october-2026-11-10/  \nhttps://www.theblock.co/news/markets/2026-11-14-bitcoin-etfs-lose-1-billion-for-the-second-week-in-a-row-as-crypto-funds-except-one-continue-bleeding-440337  \nhttps://www.federalreserve.gov/newsevents/2026-november.htm",
-  "research_sonic": "**Wydarzenia (7‑14 dni)**  \n- **22 10 2026** – Sonic Labs ogłosiło OTC‑transfer ≈ 13 mln S do nieujawnionego partnera (zapowiedź 24‑48 h).  \n- **12 11 2026** – Binance US zgłosiło awarię sieci Sonic: wycofania i depozyty były tymczasowo niedostępne od 05:11 UTC.  \n- **16 11 2026** – na Reddit pojawił się wątek „Accumulating Sonic with DLMM” opisujący spadek ceny i zachęcający do strategii DCA, wskazujący na rosnące zainteresowanie technicznymi metodami akumulacji.  \n\n**Nastrój społeczności** – **neutralny/lekko pozytywny**.  \n- OTC‑umowa jest postrzegana jako krok w stronę zwiększenia płynności i partnerstw, mimo krótkoterminowego spadku ceny.  \n- Awaria sieci wywołała niepokój, ale szybka komunikacja i brak długotrwałego przestoju łagodzią negatywny odbiór.  \n- Redditowy wątek podkreśla wiarę w długoterminowy potencjał i szuka sposobów na wykorzystanie obecnych spadków, co sugeruje optymizm wśród inwestorów technicznych.  \n\n**Główne ryzyka**  \n- Niejasny tożsamość partnera OTC i potencjalna emisja dodatkowych tokenów może zwiększyć podaż i wywołać dalsze spadki.  \n- Powtarzające się awarie sieci mogą osłabić zaufanie użytkowników i partnerów.  \n- Koncentracja akcji na strategiach DCA wskazuje na rosnącą wrażliwość na krótkoterminowe wahania ceny.  \n\n**Źródła:**  \n- https://crypto.news/sonic-labs-13m-s-token-otc-deal-price-drop/  \n- https://pingoru.io/providers/binance-us/incidents/12481705  \n- https://cryptopanic.com/news/33713644/Accumulating-Sonic-with-DLMM-An-Alternative-to-Traditional-DCA  \n- https://www.soniclabs.com/insights (oficjalne komunikaty Sonic Labs)"
+  "research_makro": "**Makro‑informacje istotne dla BTC (stan na 20.11.2026, 05:01 UTC)**  \n\n- **Ostatnia decyzja FED/FOMC** – 27‑28 listopada 2026. Stopy w przedziale **3,75 %‑4,00 %**. **2 z 12** głosujących (Lisa Cook, Beth Hammack) sprzeciwiły się i domagały podwyżki o 25 pb.  \n- **Nadchodząca decyzja** – kolejne spotkanie **9 grudnia 2026** (planowane). Rynek wycenia **≈ 90 % szans na podwyżkę 25 pb** w grudniu.  \n- **Oczekiwania rynku** – FedWatch (CME) wskazuje **≈ 90 %** na podwyżkę 25 pb w grudniu i kolejną w marcu.  \n- **CPI (październik 2026)** – wzrost **0,4 % m/m** (prognoza 0,3 %). Roczny wskaźnik szacowany **≈ 3,9‑4,0 %**.  \n- **Core PCE (październik 2026)** – szacowany **0,4 % m/m**, rocznie **≈ 3,3 %**.  \n- **Przepływy do spot‑ETF‑ów BTC** – w tygodniu do 13 nov. netto **‑ $185,5 mln** (siódma kolejna sesja spadkowa), łącznie **‑ $1,07 mld** w ostatnich 5 sesjach.  \n- **Ropa (WTI/Brent, 20 nov)** – Brent **$92,77 / bbl** (+0,9 %), WTI **$83,46 / bbl** (+0,3 %). Jednak tydzień – spadek **≈ 3,5 %** (Brent) i **≈ 6 %** (WTI).  \n- **Dolar (DXY)** – poziom **≈ 103,9** (najwyższy od 19 miesięcy).  \n- **Rentowności** – 10‑letnie Treasury **5,016 %** (spadek 10 pb w tygodniu).  \n- **Geopolityka** – nasilone ataki Houthi na Riyadh i tankowce w Cieśninie Hormuz podnoszą ryzyko surowcowe; jednocześnie OPEC+ spotyka się 29 nov w celu ustalenia produkcji 2027 r..  \n\n**Źródła:**  \n1. https://www.cnbc.com/2026/10/28/fed-interest-rate-decision-october-2026.html  \n2. https://www.reuters.com/5f374b32b07b/world/us/us-consumer-prices-rise-above-expectations-october-2026-11-10/  \n3. https://informateurcrypto.fr/en/bitcoin-etf-flows/2026-11-13  \n4. https://za.investing.com/news/economy-news/dollar-near-19month-peak-as-ai-jitters-sap-risk-appetite-4587665",
+  "research_sonic": "**Wydarzenia (ostatnie 7‑14 dni)**  \n- **12 Nov 2026 – Binance US outage** – tymczasowe wyłączenie wpłat i wypłat tokena S (Sieć Sonic)   \n- **22 Oct 2026 – OTC transfer** – Sonic Labs ogłosiło plan przeniesienia ~13 mln S do partnera strategicznego w ciągu 24‑48 h   \n- **16 Oct 2026 – Reddit** – post „Accumulating Sonic with DLMM” podkreśla wiarę w długoterminowy potencjał po spadku ceny ≈ 0,07 USD   \n\n**Nastrój inwestorów**  \n- **Pozytywny** – Redditowy post wskazuje optymizm i chęć dalszych akumulacji po obniżce ceny.  \n- **Neutralny** – OTC‑transfer i planowana wymiana tokenów są postrzegane jako zwiększające płynność, ale brak szczegółów co do partnera wywołuje ostrożność.  \n\n**Ryzyka**  \n- Ryzyko techniczne – aktualny outage Binance US może wpłynąć na dostępność S i zaufanie do sieci.  \n- Niepewność podaży – niezależny audyt i anulowanie ręcznych mintów wciąż nie dostarczyło ostatecznych wyników, co może wpłynąć na percepcję tokenomii.  \n- Ryzyko rynkowe – duży transfer OTC może wywołać krótkoterminowy spadek ceny, jeśli zostanie sprzedany na otwartym rynku.  \n\n**Źródła**  \n- https://pingoru.io/providers/binance-us/incidents/12481705  \n- https://www.tokenpost.com/news/business/37911  \n- https://www.cryptotimes.io/2026/09/22/sonic-cancels-all-manual-s-token-mints-and-orders-independent-audit/  \n- https://cryptopanic.com/news/33713644/Accumulating-Sonic-with-DLMM-An-Alternative-to-Traditional-DCA"
  },
  "niedostepne_zrodla": []
 }
