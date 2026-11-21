@@ -11,6 +11,8 @@
     "chart_from": "2026-08-01"
   },
 
+  "alerts": {"_opis": "21.11.2026 na prośbę użytkownika: wyłączone alerty poziomów wejść/wyjść planu (zdarzenia planu i czuwanie na żywo). Zostają tylko alerty StochRSI/RSI. Włączenie: plan_levels true.", "plan_levels": false},
+
   "start": {
     "_opis": "Od kiedy i w jakim stanie bot odtwarza plan na świecach 1h. phase: BUY = czekamy na zakup w strefie kroku 'step'; HOLD = mamy Sonica i czekamy na sprzedaż w kroku 'step'. Po własnej transakcji można tu wpisać aktualny stan.",
     "from": "2026-11-19T07:00:00Z",
@@ -33,7 +35,7 @@
       "note": "Kanał docelowy jak 22.09–08.10.2026: dno 0,0372, szczyty 0,0418–0,0463."}
   },
 
-  "monitor": {"enabled": true, "btc_div_15m": true, "btc_structure": true, "near_fade": true, "near_symbol": "NEARUSDT",
+  "monitor": {"enabled": false, "_wylaczono": "21.11.2026 – użytkownik chce tylko alertów StochRSI/RSI Sonica", "btc_div_15m": true, "btc_structure": true, "near_fade": true, "near_symbol": "NEARUSDT",
     "_opis": "Alerty: BTC 15m spadek momentum na szczycie + zamknięcie pod szyją; BTC zasada 1. dnia po 20-dniowym dołku; BTC pęknięcie dna; NEAR oderwany wzrost zawraca. Statystyki w monitor.py."},
 
   "stochrsi": {

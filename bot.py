@@ -345,6 +345,7 @@ def stoch_events(cfg, candles, src):
         return []
     sec = IV_SEC.get(cfg.get("interval", "1h"), 3600)
     K, D = stoch_rsi([c["c"] for c in candles], cfg["rsi_len"], cfg["stoch_len"], cfg["k_smooth"], cfg["d_smooth"])
+    R14 = _rsi([c["c"] for c in candles], 14)
     top, bot = cfg["top_level"], cfg["bottom_level"]
     t_from = P.iso_ts(cfg["alternate_from"]) if cfg.get("alternate_from") else candles[-3]["t"]
     expect = cfg.get("alternate_expect", "TOP")
@@ -355,7 +356,19 @@ def stoch_events(cfg, candles, src):
         c = candles[i]
         if expect == "BOTTOM" and K[i] <= bot < K[i - 1]:
             expect = "TOP"
-            ev.append(dict(kind="STOCH_BOTTOM", t=c["t"] + sec, k=K[i], d=D[i], price=c["c"], low=c["l"], src=src, sec=sec))
+            # poprzedni dołek K (<= 20) przed bieżącym spadkiem – do oceny dywergencji
+            j = i - 1
+            while j > 0 and K[j] is not None and K[j] > bot:
+                j -= 1
+            prev = None
+            for m in range(j, max(1, j - 72), -1):
+                if K[m] is not None and K[m] <= 20 and (K[m - 1] is None or K[m] <= K[m - 1]) and (m + 1 >= len(K) or K[m + 1] is None or K[m] <= K[m + 1]):
+                    prev = m
+                    break
+            ev.append(dict(kind="STOCH_BOTTOM", t=c["t"] + sec, k=K[i], d=D[i], price=c["c"], low=c["l"], rsi=R14[i],
+                           prev=(dict(t=candles[prev]["t"] + sec, k=K[prev], rsi=R14[prev],
+                                      price=min(x["l"] for x in candles[max(0, prev - 1):prev + 2])) if prev is not None else None),
+                           src=src, sec=sec))
             continue
         if expect == "TOP" and K[i] >= top > K[i - 1]:
             expect = "BOTTOM"
@@ -369,33 +382,45 @@ def stoch_events(cfg, candles, src):
                     prev = m
                     break
             ev.append(dict(kind="STOCH_TOP", t=c["t"] + sec, k=K[i], d=D[i], price=c["c"], high=c["h"],
-                           prev=(dict(t=candles[prev]["t"] + sec, k=K[prev], price=max(x["h"] for x in candles[max(0, prev - 1):prev + 2])) if prev is not None else None),
+                           rsi=R14[i],
+                           prev=(dict(t=candles[prev]["t"] + sec, k=K[prev], rsi=R14[prev], price=max(x["h"] for x in candles[max(0, prev - 1):prev + 2])) if prev is not None else None),
                            src=src, sec=sec))
     return ev
 
 
-def stoch_message(e, plan, btc_ctx, pst=None):
+def _r14(x):
+    return f"{x:.0f}" if x is not None else "–"
+
+
+def stoch_message(e, plan, btc_ctx=None, pst=None):
+    """Krótki alert: StochRSI / RSI(14), bieżąca cena i cena przy poprzednim szczycie/dołku wskaźnika. Bez poziomów planu."""
     when = N.pl_time(e["t"])
+    iv = plan['stochrsi'].get('interval', '1h')
+    span = f"{N.pl_time(e['t'] - e.get('sec', 3600))}–{when[-5:]}"
+    pv = e.get("prev")
     if e["kind"] == "STOCH_TOP":
-        iv = plan['stochrsi'].get('interval', '1h')
-        title = f"StochRSI {iv} ≥ {plan['stochrsi']['top_level']} – obserwuj szczyt Sonica"
-        lines = [f"Świeca {iv} {N.pl_time(e['t'] - e.get('sec', 3600))}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}."]
-        pv = e.get("prev")
+        title = f"Sonic: StochRSI {iv} ≥ {plan['stochrsi']['top_level']} – możliwy szczyt"
+        lines = [f"Teraz: StochRSI {e['k']:.0f} | RSI(14) {_r14(e.get('rsi'))} | cena {P.fmt(e['price'])} (szczyt świecy {P.fmt(e['high'])})",
+                 f"Świeca {iv} {span}"]
         if pv:
-            higher = e["high"] > pv["price"]
-            lines.append(f"Poprzedni szczyt StochRSI: {pv['k']:.0f} przy cenie {P.fmt(pv['price'])} ({N.pl_time(pv['t'])}).")
-            if higher and e["k"] < pv["k"]:
-                lines.append("Cena wyżej niż przy poprzednim szczycie, a StochRSI niżej – DYWERGENCJA (Twoja zasada: do sprzedania).")
-            elif not higher:
+            lines.append(f"Poprzedni szczyt: StochRSI {pv['k']:.0f} | RSI(14) {_r14(pv.get('rsi'))} | cena {P.fmt(pv['price'])} ({N.pl_time(pv['t'])})")
+            if e["high"] > pv["price"] and e["k"] < pv["k"]:
+                lines.append("Cena wyżej, wskaźnik niżej – DYWERGENCJA spadkowa.")
+            elif e["high"] <= pv["price"]:
                 lines.append("Cena niżej niż przy poprzednim szczycie – niższy szczyt.")
     else:
-        iv = plan['stochrsi'].get('interval', '1h')
-        title = f"StochRSI {iv} ≤ {plan['stochrsi']['bottom_level']} – możliwy dołek Sonica"
-        lines = [f"Świeca {iv} {N.pl_time(e['t'] - e.get('sec', 3600))}–{when[-5:]}: StochRSI {e['k']:.0f} (MA {e['d']:.0f}), cena {P.fmt(e['price'])}, dołek świecy {P.fmt(e['low'])}."]
-    lines += N.state_card(plan, pst)
-    bl = N._btc_short(btc_ctx)
-    if bl:
-        lines.append(bl)
+        title = f"Sonic: StochRSI {iv} ≤ {plan['stochrsi']['bottom_level']} – możliwy dołek"
+        lines = [f"Teraz: StochRSI {e['k']:.0f} | RSI(14) {_r14(e.get('rsi'))} | cena {P.fmt(e['price'])} (dołek świecy {P.fmt(e['low'])})",
+                 f"Świeca {iv} {span}"]
+        if pv:
+            lines.append(f"Poprzedni dołek: StochRSI {pv['k']:.0f} | RSI(14) {_r14(pv.get('rsi'))} | cena {P.fmt(pv['price'])} ({N.pl_time(pv['t'])})")
+            r_now, r_prev = e.get("rsi"), pv.get("rsi")
+            if e["low"] < pv["price"] and r_now is not None and r_prev is not None and r_now >= r_prev + 2:
+                lines.append("Cena niżej, RSI wyżej – dywergencja wzrostowa.")
+            elif e["low"] < pv["price"]:
+                lines.append("Cena niżej niż przy poprzednim dołku – niższy dołek, bez dywergencji.")
+            else:
+                lines.append("Cena wyżej niż przy poprzednim dołku – wyższy dołek.")
     return title, "\n".join(lines)
 
 
@@ -523,6 +548,13 @@ async def main():
         btc_ctx["price"] = btc_now
     log = []
     sent_cls = set(state.get("sent_cls") or [])
+    plan_alerts = (plan.get("alerts") or {}).get("plan_levels", True)
+    if not plan_alerts:
+        for e in new:
+            sent.add(N.key(e))      # alerty poziomów planu wyłączone – oznacz jako obsłużone, bez wysyłki
+        if new:
+            print(f"[plan] alerty poziomów wyłączone – pominięto {len(new)}")
+        new = []
     for e in new:
         ck, lvl = P.event_class_key(plan, e)
         confirm = False
@@ -598,7 +630,7 @@ async def main():
     await run_monitor(plan, state, log)
 
     # --- czuwanie na żywo do końca godziny (sygnały w trakcie budowania świecy 1h)
-    if LIVE_UNTIL_MINUTE and fresh_1h and pst["phase"] in ("BUY", "HOLD"):
+    if plan_alerts and LIVE_UNTIL_MINUTE and fresh_1h and pst["phase"] in ("BUY", "HOLD"):
         hour0 = now_ts - now_ts % 3600
         deadline = hour0 + LIVE_UNTIL_MINUTE * 60
         if time.time() < deadline - 60:
