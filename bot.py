@@ -26,6 +26,7 @@ import ai as AI
 import plan as P
 import monitor as MON
 import notify as N
+import swing as SW
 import report_html as R
 import sonic_history as H
 from sonic_core import DAY
@@ -585,6 +586,10 @@ async def main():
             if N.send(title, body, 4, ["chart_with_upwards_trend" if e["kind"] == "STOCH_TOP" else "chart_with_downwards_trend"], REPORT_URL, DRY_RUN):
                 sent.add(k)
                 log.append(dict(wyslano=now.isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ=e["kind"], krok=None, cena=e["price"], tytul=title, tresc=body))
+    # --- sygnały wahadłowe 2h (sprzedaż na szczycie odbicia / odkup na niższym dołku)
+    swcfg = plan.get("swing") or {}
+    if swcfg.get("enabled"):
+        await asyncio.to_thread(run_swing, swcfg, sent, log, now_ts)
     state["ntfy_sent"] = sorted(sent, key=lambda k: int(k.rsplit(":", 1)[-1]))[-300:]
     state["plan_phase"] = pst["phase"]
 
@@ -638,6 +643,34 @@ async def main():
     if log:
         append_signals_log(log)
     print("Koniec cyklu.")
+
+
+def run_swing(cfg, sent, log, now_ts):
+    c = None
+    for sym in (cfg.get("symbol", "SUSDC"), cfg.get("fallback_symbol", "SUSDT")):
+        try:
+            c = SW.fetch_1h(sym)
+            if c and c[-1]["t"] >= now_ts - 3 * 3600:
+                break
+        except Exception as ex:
+            print(f"[swing] {sym}: {type(ex).__name__}: {ex}")
+            c = None
+    if not c:
+        print("[swing] brak świec – pomijam")
+        return
+    bars = SW.resample(c, cfg["tf_hours"])
+    ev, st = SW.replay(cfg, bars, P.iso_ts(cfg["start"]["from"]))
+    print(f"[swing] stan {st['phase']}, odniesienie {P.fmt(st['ref'])}, zdarzeń od startu: {len(ev)}")
+    for e in ev:
+        k = f"{e['kind']}:{e['t']}"
+        if k in sent or e["t"] < now_ts - 3 * 3600:
+            continue
+        title, body = SW.message(e, cfg, N.pl_time)
+        pr, tg = {"SWING_SELL": (5, ["moneybag"]), "SWING_BUY": (5, ["shopping_cart"])}.get(e["kind"], (3, ["rocket"]))
+        if N.send(title, body, pr, tg, None, DRY_RUN):
+            sent.add(k)
+            log.append(dict(wyslano=datetime.now(timezone.utc).isoformat(), czas_swiecy_pl=N.pl_time(e["t"]), typ=e["kind"],
+                            krok=None, cena=e["price"], tytul=title, tresc=body))
 
 
 async def run_monitor(plan, state, log):

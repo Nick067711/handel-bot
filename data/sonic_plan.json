@@ -38,9 +38,14 @@
   "monitor": {"enabled": false, "_wylaczono": "21.11.2026 – użytkownik chce tylko alertów StochRSI/RSI Sonica", "btc_div_15m": true, "btc_structure": true, "near_fade": true, "near_symbol": "NEARUSDT",
     "_opis": "Alerty: BTC 15m spadek momentum na szczycie + zamknięcie pod szyją; BTC zasada 1. dnia po 20-dniowym dołku; BTC pęknięcie dna; NEAR oderwany wzrost zawraca. Statystyki w monitor.py."},
 
+  "swing": {"_opis": "22.11.2026: sygnały wahadłowe na świecach 2h (swing.py). SPRZEDAŻ: zysk ≥ min_gain od zakupu + RSI(14) ≥ rsi_hi + StochRSI z ≥ k_hi przecina D w dół (opis: drugi niższy szczyt / mocne wykupienie / szczyt odbicia). ODKUP: cena ≤ sprzedaż × (1 − min_drop) + niższy dołek fali (zygzak 8%) + RSI ≤ rsi_lo + StochRSI z ≤ k_lo przecina D w górę. Backtest Sonic 05–11.2026: 12 transakcji, liczba S ×2,07; 02–08.2025: ×1,89. Stan startowy = pozycja użytkownika; po jego transakcji zaktualizuj start.",
+    "enabled": true, "symbol": "SUSDC", "fallback_symbol": "SUSDT", "tf_hours": 2, "zigzag": 0.08, "lookback": 6, "fee": 0.008,
+    "min_gain": 0.065, "min_drop": 0.08, "rsi_hi": 58, "rsi_lo": 40, "k_hi": 75, "k_lo": 25, "retrace": 0.5, "rsi_x": 72, "breakout": 0.03,
+    "start": {"from": "2026-11-22T10:00:00Z", "phase": "HOLD", "ref_price": 0.0274, "S": 110000, "note": "użytkownik: 110 000 S, średni zakup ok. 0,0274 (20.11.2026)"}},
+
   "stochrsi": {
     "_opis": "Alerty StochRSI 1h Sonica na ntfy (prośba użytkownika 18.11.2026). TOP: linia STOCHRSI przechodzi w górę przez top_level (obserwuj szczyt; info o dywergencji z poprzednim szczytem). BOTTOM: linia schodzi do bottom_level (możliwy dołek). Dane: Binance S/USDC 1h (jak w aplikacji użytkownika), zapas S/USDT, potem Coinbase.",
-    "enabled": true, "symbol": "SUSDC", "fallback_symbol": "SUSDT", "interval": "1h",
+    "enabled": false, "symbol": "SUSDC", "fallback_symbol": "SUSDT", "interval": "1h",
     "alternate_from": "2026-11-18T07:00:00Z", "alternate_expect": "TOP",
     "rsi_len": 7, "stoch_len": 7, "k_smooth": 3, "d_smooth": 3,
     "top_level": 58, "bottom_level": 5
