@@ -1,19 +1,19 @@
-"""Sygnały wahadłowe Sonica (SPRZEDAŻ na szczycie odbicia / ODKUP na niższym dołku) – świece 2h.
+"""Sygnały wahadłowe Sonica do akumulacji w trendzie spadkowym – świece 1h (szybki sygnał) w kontekście 2h.
 
-Zasady (sprawdzone na historii Sonica 02.2025–11.2026, skrypty w opisie commita):
-- Fale krótkoterminowe liczone zygzakiem 8% na świecach 2h (szczyt potwierdzony, gdy cena spadnie 8% od niego; dołek odwrotnie).
-- SPRZEDAŻ (gdy trzymasz Sonica):
-    * cena ≥ cena odniesienia (ostatni zakup) × (1 + min_gain) – sygnał tylko przy wypracowanym zysku,
-    * wykupienie: RSI(14) 2h ≥ rsi_hi w ostatnich 6 świecach, StochRSI(14,14,3,3) było ≥ k_hi i właśnie przecina linię D w dół,
-    * opis: „drugi niższy szczyt” (odbicie pod poprzedni szczyt fali), „mocne wykupienie” (RSI ≥ rsi_x) albo „szczyt odbicia”.
-- ODKUP (gdy masz gotówkę):
-    * cena ≤ cena sprzedaży × (1 − min_drop),
-    * niższy dołek: cena zeszła pod ostatni potwierdzony dołek fali,
-    * wyprzedanie: RSI(14) 2h ≤ rsi_lo w ostatnich 6 świecach, StochRSI było ≤ k_lo i przecina D w górę.
-- Informacyjnie (nie zmienia stanu): przy gotówce zamknięcie 2h ponad ostatni szczyt fali × (1 + breakout) – „wybicie”.
+Zasady (backtest Sonica od szczytu 0,0739 z 13.10.2026 do 22.11.2026: 12 transakcji, liczba S ×2,04 mimo spadku ceny
+o ok. 64%; okna kontrolne: 05–06.2026 ×1,52, 12.2025–04.2026 ×1,85):
+- Fale liczone zygzakiem 8% na świecach 2h. Trend: wyższy ostatni dołek fali niż poprzedni = „po tymczasowym dnie”
+  (wyższe dołki), niższy = trend spadkowy.
+- SPRZEDAŻ (masz Sonica): RSI(14) 2h ≥ rsi_hi w ostatnich 7 świecach 2h oraz zawrócenie StochRSI(14,14,3,3) w dół:
+  na 2h (z ≥ k_hi) albo szybciej na 1h (z ≥ 80) przy StochRSI 2h ≥ k2_ctx_hi. Bez wymogu zysku względem zakupu
+  (min_gain = null) – zysk liczy się w liczbie Soników przy odkupie niżej.
+- ODKUP (masz gotówkę): cena ≤ sprzedaż × (1 − min_drop), RSI(14) 2h ≤ rsi_lo, zawrócenie StochRSI w górę (2h z ≤ k_lo
+  albo 1h z ≤ 20 przy StochRSI 2h ≤ k2_ctx_lo) oraz niższy dołek (pod ostatni dołek fali), a po tymczasowym dnie także
+  wyższy dołek po cofnięciu ≥ pullback od szczytu fali.
+- Informacyjnie: przy gotówce zamknięcie 1h ponad ostatni szczyt fali × (1 + breakout) – „wybicie”.
 
-Stan odtwarzany deterministycznie od swing.start (faza, cena odniesienia, liczba S), więc każde uruchomienie
-bota daje te same zdarzenia; nowe są wysyłane raz (klucz rodzaj:czas).
+Stan odtwarzany deterministycznie od swing.start, więc każde uruchomienie bota daje te same zdarzenia;
+nowe są wysyłane raz (klucz rodzaj:czas).
 """
 import json, urllib.request, urllib.parse
 
@@ -76,77 +76,87 @@ def stoch(c, rl=14, sl=14, k=3, d=3):
     return K, D
 
 
-def replay(cfg, c, start_ts):
-    """Zwraca (zdarzenia, stan końcowy). c – świece interwału cfg['tf_hours'] (zamknięte)."""
-    th, lb, fee = cfg["zigzag"], cfg["lookback"], cfg["fee"]
-    sec = cfg["tf_hours"] * 3600
-    C = [x["c"] for x in c]
-    R = rsi(C)
-    K, D = stoch(C)
+def _cross(K, D, k, lb, down, lvl):
+    if k < lb + 1 or None in (K[k - 1], K[k], D[k - 1], D[k]):
+        return False
+    kw = [K[q] for q in range(k - lb, k + 1) if K[q] is not None]
+    if down:
+        return K[k - 1] >= D[k - 1] and K[k] < D[k] and max(kw) >= lvl
+    return K[k - 1] <= D[k - 1] and K[k] > D[k] and min(kw) <= lvl
+
+
+def replay(cfg, c1, start_ts):
+    """c1 – zamknięte świece 1h. Zwraca (zdarzenia, stan końcowy)."""
+    tfh = cfg["tf_hours"]; sec2 = tfh * 3600
+    c2 = resample(c1, tfh)
+    C1 = [x["c"] for x in c1]; C2 = [x["c"] for x in c2]
+    K1, D1 = stoch(C1); R2 = rsi(C2); K2, D2 = stoch(C2)
+    th, fee, lb = cfg["zigzag"], cfg["fee"], cfg["lookback"]
     st = cfg["start"]
-    state = st["phase"]                    # HOLD = masz Sonica, CASH = masz gotówkę
-    ref = st["ref_price"]
-    S = float(st.get("S") or 0)
-    cash = float(st.get("cash") or 0)
-    mode, ext, ei = "up", c[0]["h"], 0
-    tops, bots, ev = [], [], []
-    brk_done = set()
-    for i in range(1, len(c)):
-        x = c[i]
-        if mode == "up":
-            if x["h"] > ext:
-                ext, ei = x["h"], i
-            elif x["l"] <= ext * (1 - th):
-                tops.append((ei, ext)); mode, ext, ei = "down", x["l"], i
-        else:
-            if x["l"] < ext:
-                ext, ei = x["l"], i
-            elif x["h"] >= ext * (1 + th):
-                bots.append((ei, ext)); mode, ext, ei = "up", x["h"], i
-        t_close = x["t"] + sec
-        if t_close <= start_ts or i <= lb:
+    state, ref = st["phase"], st["ref_price"]
+    S, cash = float(st.get("S") or 0), float(st.get("cash") or 0)
+    mode, ext, ei = "up", (c2[0]["h"] if c2 else 0), 0
+    tops, bots, ev, brk_done, trend, j2 = [], [], [], set(), "down", -1
+    for i in range(lb + 1, len(c1)):
+        t = c1[i]["t"] + 3600
+        while j2 + 1 < len(c2) and c2[j2 + 1]["t"] + sec2 <= t:
+            j2 += 1; x = c2[j2]
+            if mode == "up":
+                if x["h"] > ext:
+                    ext, ei = x["h"], j2
+                elif x["l"] <= ext * (1 - th):
+                    tops.append((ei, ext)); mode, ext, ei = "down", x["l"], j2
+            else:
+                if x["l"] < ext:
+                    ext, ei = x["l"], j2
+                elif x["h"] >= ext * (1 + th):
+                    bots.append((ei, ext)); mode, ext, ei = "up", x["h"], j2
+                    if len(bots) >= 2:
+                        trend = "up" if bots[-1][1] > bots[-2][1] else "down"
+        if j2 < 20 or t <= start_ts:
             continue
-        k0, k1, d0, d1 = K[i - 1], K[i], D[i - 1], D[i]
-        if None in (k0, k1, d0, d1) or R[i] is None:
+        price = C1[i]
+        on2 = c2[j2]["t"] + sec2 == t
+        x2dn = on2 and _cross(K2, D2, j2, lb, True, cfg["k_hi"])
+        x2up = on2 and _cross(K2, D2, j2, lb, False, cfg["k_lo"])
+        x1dn = _cross(K1, D1, i, lb, True, 80) and K2[j2] is not None and K2[j2] >= cfg["k2_ctx_hi"]
+        x1up = _cross(K1, D1, i, lb, False, 20) and K2[j2] is not None and K2[j2] <= cfg["k2_ctx_lo"]
+        rw = [R2[q] for q in range(j2 - lb, j2 + 1) if R2[q] is not None]
+        if not rw:
             continue
-        w = range(i - lb, i + 1)
-        kw = [K[j] for j in w if K[j] is not None]
-        rw = [R[j] for j in w if R[j] is not None]
-        price = C[i]
-        base = dict(t=t_close, price=price, rsi=R[i], k=k1, ref=ref,
-                    last_top=tops[-1][1] if tops else None, last_bot=bots[-1][1] if bots else None)
+        lo = min(c1[q]["l"] for q in range(i - 5, i + 1))
+        tmp_bottom = min(b[1] for b in bots[-6:]) if bots else None
+        base = dict(t=t, price=price, ref=ref, rsi2=R2[j2], k1=K1[i], k2=K2[j2], trend=trend,
+                    last_top=tops[-1][1] if tops else None, last_bot=bots[-1][1] if bots else None, tmp_bottom=tmp_bottom)
         if state == "HOLD":
-            if price < ref * (1 + cfg["min_gain"]):
+            if cfg.get("min_gain") is not None and price < ref * (1 + cfg["min_gain"]):
                 continue
-            if not (k0 >= d0 and k1 < d1 and max(kw) >= cfg["k_hi"] and max(rw) >= cfg["rsi_hi"]):
-                continue
-            hi = max(c[j]["h"] for j in w)
-            why = "szczyt odbicia"
-            if tops and bots and bots[-1][0] > tops[-1][0] and mode == "up":
-                T1, B1 = tops[-1][1], bots[-1][1]
-                if B1 + cfg["retrace"] * (T1 - B1) <= hi <= T1 * 1.02:
-                    why = "drugi niższy szczyt"
-            if why == "szczyt odbicia" and max(rw) >= cfg["rsi_x"]:
-                why = "mocne wykupienie"
-            cash = S * price * (1 - fee)
-            ev.append(dict(base, kind="SWING_SELL", why=why, S_before=S, cash_after=cash, rsi_max=max(rw), gain=price / ref - 1))
-            S, state, ref = 0.0, "CASH", price
+            if (x2dn or x1dn) and max(rw) >= cfg["rsi_hi"]:
+                why = "drugi niższy szczyt" if (tops and bots and bots[-1][0] > tops[-1][0] and mode == "up"
+                                               and bots[-1][1] + 0.5 * (tops[-1][1] - bots[-1][1]) <= max(c1[q]["h"] for q in range(i - 5, i + 1)) <= tops[-1][1] * 1.02) else "szczyt odbicia"
+                cash = S * price * (1 - fee)
+                ev.append(dict(base, kind="SWING_SELL", why=why, src="2h" if x2dn else "1h", S_before=S, cash_after=cash,
+                               rsi_max=max(rw), gain=price / ref - 1))
+                S, state, ref = 0.0, "CASH", price
         else:
-            if price <= ref * (1 - cfg["min_drop"]) and k0 <= d0 and k1 > d1 and min(kw) <= cfg["k_lo"] and min(rw) <= cfg["rsi_lo"]:
+            if price <= ref * (1 - cfg["min_drop"]) and (x2up or x1up) and min(rw) <= cfg["rsi_lo"]:
                 prev_low = bots[-1][1] if bots else None
-                lo = min(c[j]["l"] for j in w)
-                lower = (prev_low is not None and lo < prev_low) or (mode == "down" and prev_low is not None and ext < prev_low)
-                if lower:
+                lower = prev_low is not None and (lo < prev_low or (mode == "down" and ext < prev_low))
+                higher = (cfg.get("uptrend") and trend == "up" and prev_low is not None and lo > prev_low and tops
+                          and lo <= tops[-1][1] * (1 - cfg["pullback"]))
+                if lower or higher:
                     S = cash / price * (1 - fee)
-                    ev.append(dict(base, kind="SWING_BUY", why="niższy dołek", cash_before=cash, S_after=S, rsi_min=min(rw),
-                                   prev_low=prev_low, drop=price / ref - 1))
+                    ev.append(dict(base, kind="SWING_BUY", why="niższy dołek" if lower else "wyższy dołek po tymczasowym dnie",
+                                   src="2h" if x2up else "1h", cash_before=cash, S_after=S, rsi_min=min(rw), prev_low=prev_low,
+                                   drop=price / ref - 1))
                     cash, state, ref = 0.0, "HOLD", price
                     continue
             if cfg.get("breakout") and tops and price >= tops[-1][1] * (1 + cfg["breakout"]) and tops[-1][0] not in brk_done and price > ref:
                 brk_done.add(tops[-1][0])
                 ev.append(dict(base, kind="SWING_BREAKOUT", top=tops[-1][1]))
-    return ev, dict(phase=state, ref=ref, S=S, cash=cash, last_top=tops[-1][1] if tops else None,
-                    last_bot=bots[-1][1] if bots else None)
+    return ev, dict(phase=state, ref=ref, S=S, cash=cash, trend=trend,
+                    last_top=tops[-1][1] if tops else None, last_bot=bots[-1][1] if bots else None,
+                    tmp_bottom=min(b[1] for b in bots[-6:]) if bots else None)
 
 
 def _f(x):
@@ -162,26 +172,37 @@ def _n(x):
     return f"{x:,.0f}".replace(",", " ")
 
 
+def _trend_txt(e):
+    tb = e.get("tmp_bottom")
+    if e.get("why") == "niższy dołek":
+        return "Struktura: niższy dołek – trend spadkowy trwa, buduje się nowe tymczasowe dno."
+    if e.get("trend") == "up" and tb:
+        return f"Struktura: po tymczasowym dnie {_f(tb)} wyższe dołki."
+    return "Struktura: trend spadkowy (niższe dołki)" + (f", tymczasowe dno {_f(tb)}." if tb else ".")
+
+
 def message(e, cfg, pl_time):
-    tf = f"{cfg['tf_hours']}h"
     when = pl_time(e["t"])
     if e["kind"] == "SWING_SELL":
         title = f"Sonic: SPRZEDAŻ – {e['why']} ({_f(e['price'])})"
-        lines = [f"Świeca {tf} zamknięta {when}: cena {_f(e['price'])}, RSI {e['rsi']:.0f} (max {e['rsi_max']:.0f}), StochRSI {e['k']:.0f} – zawraca w dół.",
-                 f"Zysk względem zakupu {_f(e['ref'])}: {_p(e['gain'])}.",
-                 f"{_n(e['S_before'])} S ≈ {_n(e['cash_after'])} $ po prowizji."]
+        lines = [f"Świeca 1h zamknięta {when}: cena {_f(e['price'])}. Sygnał {e['src']}: StochRSI zawraca w dół "
+                 f"(1h {e['k1']:.0f}, 2h {e['k2']:.0f}), RSI 2h max {e['rsi_max']:.0f}.",
+                 f"Względem zakupu {_f(e['ref'])}: {_p(e['gain'])}. {_n(e['S_before'])} S ≈ {_n(e['cash_after'])} $ po prowizji.",
+                 _trend_txt(e)]
         nxt = e["price"] * (1 - cfg["min_drop"])
-        lb = f" i pod ostatni dołek fali {_f(e['last_bot'])}" if e.get("last_bot") else ""
-        lines.append(f"Odkup: dopiero przy cenie ≤ {_f(nxt)}{lb}, gdy RSI się odwróci (osobny alert).")
+        s_back = e["cash_after"] / nxt * (1 - cfg["fee"])
+        lines.append(f"Odkup najwcześniej przy ≤ {_f(nxt)} (≈ {_n(s_back)} S), gdy RSI się odwróci – osobny alert.")
     elif e["kind"] == "SWING_BUY":
-        title = f"Sonic: ODKUP – niższy dołek ({_f(e['price'])})"
-        lines = [f"Świeca {tf} zamknięta {when}: cena {_f(e['price'])}, RSI {e['rsi']:.0f} (min {e['rsi_min']:.0f}), StochRSI {e['k']:.0f} – zawraca w górę.",
-                 f"Pod poprzednim dołkiem fali {_f(e['prev_low'])}; {_p(e['drop'])} względem sprzedaży {_f(e['ref'])}.",
-                 f"{_n(e['cash_before'])} $ ≈ {_n(e['S_after'])} S po prowizji."]
-        lines.append(f"Kolejna sprzedaż: dopiero od {_f(e['price'] * (1 + cfg['min_gain']))} przy wykupieniu (osobny alert).")
+        title = f"Sonic: ODKUP – {e['why']} ({_f(e['price'])})"
+        lines = [f"Świeca 1h zamknięta {when}: cena {_f(e['price'])}. Sygnał {e['src']}: StochRSI zawraca w górę "
+                 f"(1h {e['k1']:.0f}, 2h {e['k2']:.0f}), RSI 2h min {e['rsi_min']:.0f}.",
+                 f"Poprzedni dołek fali {_f(e['prev_low'])}; {_p(e['drop'])} względem sprzedaży {_f(e['ref'])}.",
+                 f"{_n(e['cash_before'])} $ ≈ {_n(e['S_after'])} S po prowizji.",
+                 _trend_txt(e)]
     else:
         title = f"Sonic: wybicie ponad szczyt fali {_f(e['top'])} – uwaga"
-        lines = [f"Świeca {tf} zamknięta {when}: cena {_f(e['price'])} ponad ostatnim szczytem fali {_f(e['top'])}.",
-                 f"Masz gotówkę ze sprzedaży po {_f(e['ref'])}. Mocne wybicie bywa początkiem większego ruchu – rozważ, czy czekać na odkup niżej."]
+        lines = [f"Świeca 1h zamknięta {when}: cena {_f(e['price'])} ponad ostatnim szczytem fali {_f(e['top'])}.",
+                 f"Masz gotówkę ze sprzedaży po {_f(e['ref'])}. Mocne wybicie bywa początkiem większego ruchu – rozważ, czy czekać na odkup niżej.",
+                 _trend_txt(e)]
     lines.append("Jeśli nie wykonałeś transakcji, napisz – zaktualizuję stan bota.")
     return title, "\n".join(lines)

@@ -658,9 +658,9 @@ def run_swing(cfg, sent, log, now_ts):
     if not c:
         print("[swing] brak świec – pomijam")
         return
-    bars = SW.resample(c, cfg["tf_hours"])
-    ev, st = SW.replay(cfg, bars, P.iso_ts(cfg["start"]["from"]))
-    print(f"[swing] stan {st['phase']}, odniesienie {P.fmt(st['ref'])}, zdarzeń od startu: {len(ev)}")
+    ev, st = SW.replay(cfg, c, P.iso_ts(cfg["start"]["from"]))
+    print(f"[swing] stan {st['phase']}, odniesienie {P.fmt(st['ref'])}, trend {st['trend']}, tymczasowe dno "
+          f"{P.fmt(st['tmp_bottom']) if st['tmp_bottom'] else '–'}, zdarzeń od startu: {len(ev)}")
     for e in ev:
         k = f"{e['kind']}:{e['t']}"
         if k in sent or e["t"] < now_ts - 3 * 3600:
