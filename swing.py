@@ -97,6 +97,7 @@ def replay(cfg, c1, start_ts):
     S, cash = float(st.get("S") or 0), float(st.get("cash") or 0)
     mode, ext, ei = "up", (c2[0]["h"] if c2 else 0), 0
     tops, bots, ev, brk_done, trend, j2 = [], [], [], set(), "down", -1
+    blow, ntrig = None, 0          # dołek bieżącego odbicia i liczba sygnałów wykupienia od niego
     for i in range(lb + 1, len(c1)):
         t = c1[i]["t"] + 3600
         while j2 + 1 < len(c2) and c2[j2 + 1]["t"] + sec2 <= t:
@@ -129,15 +130,26 @@ def replay(cfg, c1, start_ts):
         base = dict(t=t, price=price, ref=ref, rsi2=R2[j2], k1=K1[i], k2=K2[j2], trend=trend,
                     last_top=tops[-1][1] if tops else None, last_bot=bots[-1][1] if bots else None, tmp_bottom=tmp_bottom)
         if state == "HOLD":
+            if blow is None or c1[i]["l"] < blow:
+                blow, ntrig = c1[i]["l"], 0          # nowe odbicie zaczyna się od nowego dołka
             if cfg.get("min_gain") is not None and price < ref * (1 + cfg["min_gain"]):
                 continue
             if (x2dn or x1dn) and max(rw) >= cfg["rsi_hi"]:
-                why = "drugi niższy szczyt" if (tops and bots and bots[-1][0] > tops[-1][0] and mode == "up"
-                                               and bots[-1][1] + 0.5 * (tops[-1][1] - bots[-1][1]) <= max(c1[q]["h"] for q in range(i - 5, i + 1)) <= tops[-1][1] * 1.02) else "szczyt odbicia"
+                ntrig += 1
+                bounce = max(c1[q]["h"] for q in range(i - 11, i + 1)) / blow - 1
+                mode_s = cfg.get("sell_mode", "first")
+                if mode_s == "adaptive" and ntrig < 2 and bounce < cfg.get("big_bounce", 0.08):
+                    continue                          # pierwszy szczyt małego odbicia – czekamy na drugi
+                if ntrig >= 2:
+                    why = "drugi szczyt odbicia"
+                elif mode_s == "adaptive":
+                    why = f"duże odbicie (+{bounce * 100:.0f}% od dołka)".replace(".", ",")
+                else:
+                    why = "szczyt odbicia"
                 cash = S * price * (1 - fee)
                 ev.append(dict(base, kind="SWING_SELL", why=why, src="2h" if x2dn else "1h", S_before=S, cash_after=cash,
                                rsi_max=max(rw), gain=price / ref - 1))
-                S, state, ref = 0.0, "CASH", price
+                S, state, ref, blow, ntrig = 0.0, "CASH", price, None, 0
         else:
             if price <= ref * (1 - cfg["min_drop"]) and (x2up or x1up) and min(rw) <= cfg["rsi_lo"]:
                 prev_low = bots[-1][1] if bots else None
@@ -149,7 +161,7 @@ def replay(cfg, c1, start_ts):
                     ev.append(dict(base, kind="SWING_BUY", why="niższy dołek" if lower else "wyższy dołek po tymczasowym dnie",
                                    src="2h" if x2up else "1h", cash_before=cash, S_after=S, rsi_min=min(rw), prev_low=prev_low,
                                    drop=price / ref - 1))
-                    cash, state, ref = 0.0, "HOLD", price
+                    cash, state, ref, blow, ntrig = 0.0, "HOLD", price, None, 0
                     continue
             if cfg.get("breakout") and tops and price >= tops[-1][1] * (1 + cfg["breakout"]) and tops[-1][0] not in brk_done and price > ref:
                 brk_done.add(tops[-1][0])
