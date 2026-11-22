@@ -106,5 +106,14 @@
   "cena": null,
   "tytul": "BTC: dno 57 778 pękło – zamknięcie 1h 56 740",
   "tresc": "Świeca 21.11 04:00. Historia (18 przypadków od 2025): NEAR w 48 h spadał dalej typowo o 5,5%, w 5 z 18 o ≥10%.\nBTC 56 740 | ostatni dołek 57 778 (20.11) | +4,7%: 60 494 | +9,6%: 63 325"
+ },
+ {
+  "wyslano": "2026-11-22T14:01:05.753329+00:00",
+  "czas_swiecy_pl": "22.11 15:00",
+  "typ": "SWING_SELL",
+  "krok": null,
+  "cena": 0.02798,
+  "tytul": "Sonic: SPRZEDAŻ – szczyt odbicia (0,02798)",
+  "tresc": "Świeca 1h zamknięta 22.11 15:00: cena 0,02798. Sygnał 1h: StochRSI zawraca w dół (1h 98, 2h 100), RSI 2h max 55.\nWzględem zakupu 0,0266: +5,2%. 110 000 S ≈ 3 053 $ po prowizji.\nStruktura: trend spadkowy (niższe dołki), tymczasowe dno 0,02513.\nOdkup najwcześniej przy ≤ 0,02574 (≈ 117 660 S), gdy RSI się odwróci – osobny alert.\nJeśli nie wykonałeś transakcji, napisz – zaktualizuję stan bota."
  }
 ]
