@@ -115,5 +115,14 @@
   "cena": 0.02798,
   "tytul": "Sonic: SPRZEDAŻ – szczyt odbicia (0,02798)",
   "tresc": "Świeca 1h zamknięta 22.11 15:00: cena 0,02798. Sygnał 1h: StochRSI zawraca w dół (1h 98, 2h 100), RSI 2h max 55.\nWzględem zakupu 0,0266: +5,2%. 110 000 S ≈ 3 053 $ po prowizji.\nStruktura: trend spadkowy (niższe dołki), tymczasowe dno 0,02513.\nOdkup najwcześniej przy ≤ 0,02574 (≈ 117 660 S), gdy RSI się odwróci – osobny alert.\nJeśli nie wykonałeś transakcji, napisz – zaktualizuję stan bota."
+ },
+ {
+  "wyslano": "2026-11-22T16:01:05.598387+00:00",
+  "czas_swiecy_pl": "22.11 17:00",
+  "typ": "SWING_SELL",
+  "krok": null,
+  "cena": 0.02765,
+  "tytul": "Sonic: SPRZEDAŻ – drugi szczyt odbicia (0,02765)",
+  "tresc": "Świeca 1h zamknięta 22.11 17:00: cena 0,02765. Sygnał 2h: StochRSI zawraca w dół (1h 75, 2h 92), RSI 2h max 55.\nWzględem zakupu 0,0266: +3,9%. 110 000 S ≈ 3 017 $ po prowizji.\nStruktura: trend spadkowy (niższe dołki), tymczasowe dno 0,02513.\nOdkup najwcześniej przy ≤ 0,02544 (≈ 117 660 S), gdy RSI się odwróci – osobny alert.\nJeśli nie wykonałeś transakcji, napisz – zaktualizuję stan bota."
  }
 ]
