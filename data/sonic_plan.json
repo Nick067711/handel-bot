@@ -43,7 +43,7 @@
     "min_gain": null, "min_drop": 0.08, "rsi_hi": 50, "rsi_lo": 40, "k_hi": 75, "k_lo": 20, "k2_ctx_hi": 70, "k2_ctx_lo": 30,
     "uptrend": true, "pullback": 0.08, "breakout": 0.03,
     "sell_mode": "adaptive", "big_bounce": 0.08, "_sell_mode": "22.11.2026 na prośbę użytkownika: sprzedaż dopiero na drugim szczycie odbicia (drugi sygnał wykupienia od dołka odbicia); na pierwszym tylko, gdy odbicie ≥ big_bounce od dołka. Backtest 3 okresów spadków: łącznie lepiej niż sprzedaż na pierwszym szczycie, w okresie 13.10–22.11 nieco gorzej (ok. 212 tys. vs 237 tys. S).",
-    "start": {"from": "2026-11-23T08:00:00Z", "phase": "CASH", "ref_price": 0.02813, "S": 0, "cash": 3097, "note": "użytkownik: 3 097 $ ze sprzedaży 110 000 S po 0,02813 rano 23.11.2026 (wcześniej zakup po 0,0266 22.11)"}},
+    "start": {"from": "2026-11-26T15:00:00Z", "phase": "CASH", "ref_price": 0.0286, "S": 0, "cash": 3300, "note": "użytkownik: 3 300 $ ze sprzedaży po ok. 0,0286 (26.11.2026)"}},
 
   "stochrsi": {
     "_opis": "Alerty StochRSI 1h Sonica na ntfy (prośba użytkownika 18.11.2026). TOP: linia STOCHRSI przechodzi w górę przez top_level (obserwuj szczyt; info o dywergencji z poprzednim szczytem). BOTTOM: linia schodzi do bottom_level (możliwy dołek). Dane: Binance S/USDC 1h (jak w aplikacji użytkownika), zapas S/USDT, potem Coinbase.",
